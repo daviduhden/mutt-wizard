@@ -43,7 +43,8 @@ eval "$(grep -hE \
 # For non-interactive shell (e.g. cron job) run only when the GPG key (in $GNUPGHOME or pass --homedir) is unlocked
 tty -s || (echo "dummy" | gpg --sign --batch --pinentry-mode error -o /dev/null > /dev/null 2>&1) || exit
 
-export GPG_TTY="$(tty)"
+GPG_TTY="$(tty)"
+export GPG_TTY
 
 # mbsync reads its configuration from ~/.mbsyncrc or via -c; there is no
 # MBSYNCRC environment variable, so wrap it in a shell function (an alias
@@ -115,6 +116,8 @@ syncandnotify() {
 		"$maildir/$2/"[Ii][Nn][Bb][Oo][Xx]/cur/ \
 		-type f -newer "$lastrun" 2> /dev/null)
 	newcount=$(echo "$new" | sed '/^[[:space:]]*$/d' | wc -l)
+	# shellcheck disable=SC2194
+	# (the arithmetic expansion in the case pattern is intentional)
 	case 1 in
 		$((newcount > 5)) )
 			tty -s 2>/dev/null && echo "$newcount new mails for $2." >/dev/tty
@@ -176,6 +179,8 @@ done
 
 IFS=' '
 for pid in $pids; do
+	# shellcheck disable=SC2086
+	# ($pid is a single word from the controlled $pids list)
 	wait $pid || failed=$((failed+1))
 done
 

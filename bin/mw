@@ -75,6 +75,8 @@ rewrite() {
 delete_block() {
 	file="$1"
 	start="$2"
+	# shellcheck disable=SC2016
+	# ($0/$1 refer to awk fields, not shell parameters)
 	rewrite "$file" awk -v start="$start" '
 		$0 == start { skip = 1; next }
 		skip && /^account[[:space:]]/ { skip = 0 }
