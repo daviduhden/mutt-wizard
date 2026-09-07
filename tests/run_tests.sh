@@ -7,10 +7,17 @@
 # real passwords or root privileges are needed. Platform detection is
 # mocked by overriding `uname` through PATH (MW_TEST_OS), so OpenBSD and
 # macOS branches can be exercised from Linux without modifying the host.
+#
+# shellcheck disable=SC2086,SC2016,SC2329
+#   SC2086: the file lists ($SHELL_FILES/$TEMPLATE_FILES) are controlled,
+#           whitespace-separated paths with no spaces; splitting is intended.
+#   SC2016: single-quoted strings containing $ are passed to sh -c or used
+#           as descriptions on purpose.
+#   SC2329: some helpers are only invoked indirectly through expect()/run_env.
 
 set -u
 
-ROOT="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/mw-tests.XXXXXX")" || exit 1
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
@@ -116,7 +123,7 @@ expect_status() {
 mkhome() {
 	h="$1"
 	mkdir -p "$h/.password-store"
-	: > "$h/.password-store/.gpg-id"
+	: >"$h/.password-store/.gpg-id"
 	printf '%s\n' "$h"
 }
 
@@ -148,7 +155,7 @@ check_forbidden() {
 	shift 2
 	# Skip comment lines (they cannot contain executable constructs);
 	# '#!' shebang lines are exempted and checked separately.
-	if grep -vE '^[[:space:]]*#[^!]' "$@" | grep -nE "$pat" > "$TMP/forbidden" 2>/dev/null; then
+	if grep -vE '^[[:space:]]*#[^!]' "$@" | grep -nE "$pat" >"$TMP/forbidden" 2>/dev/null; then
 		bad "$desc"
 		sed 's/^/     | /' "$TMP/forbidden"
 	else
@@ -183,7 +190,7 @@ check_forbidden "no setsid" 'setsid[[:space:]]' $SHELL_FILES
 check_forbidden "no /proc or /sys usage" '/proc/|/sys/' $SHELL_FILES
 # Package-manager names inside echo strings are fine (user guidance); only
 # flag lines that could actually execute them.
-if grep -vE 'echo[[:space:]]' $SHELL_FILES | grep -nE '(apt-get|apt|pacman|dnf|yum|brew)[[:space:]]' > "$TMP/forbidden" 2>/dev/null; then
+if grep -vE 'echo[[:space:]]' $SHELL_FILES | grep -nE '(apt-get|apt|pacman|dnf|yum|brew)[[:space:]]' >"$TMP/forbidden" 2>/dev/null; then
 	bad "no package manager calls"
 	sed 's/^/     | /' "$TMP/forbidden"
 else
@@ -193,21 +200,21 @@ check_forbidden "no bare mktemp (template required)" 'mktemp[[:space:]]*\)' $SHE
 check_forbidden "no pgrep -a (Linux-only flag)" 'pgrep[[:space:]]+-a' $SHELL_FILES
 check_forbidden "no hardcoded /usr/bin paths" '/usr/bin/(neomutt|msmtp|mbsync|mpop|pass|notmuch)' $SHELL_FILES
 check_forbidden "no echo -e/-n/-E" 'echo[[:space:]]+-[eEnN]' $SHELL_FILES
-check_forbidden "no \$RANDOM" '\$RANDOM' $SHELL_FILES
+check_forbidden 'no $RANDOM' '\$RANDOM' $SHELL_FILES
 check_forbidden "no pushd/popd" 'pushd|popd' $SHELL_FILES
-if grep -vE '^[[:space:]]*#' $SHELL_FILES | grep -nF '\|' > "$TMP/forbidden" 2>/dev/null; then
+if grep -vE '^[[:space:]]*#' $SHELL_FILES | grep -nF '\|' >"$TMP/forbidden" 2>/dev/null; then
 	bad "no GNU BRE alternation (\|) in patterns"
 	sed 's/^/     | /' "$TMP/forbidden"
 else
 	ok "no GNU BRE alternation (\|) in patterns"
 fi
-if grep -nF '\s' $SHELL_FILES > "$TMP/forbidden" 2>/dev/null; then
+if grep -nF '\s' $SHELL_FILES >"$TMP/forbidden" 2>/dev/null; then
 	bad "no \s shorthand in patterns"
 	sed 's/^/     | /' "$TMP/forbidden"
 else
 	ok "no \s shorthand in patterns"
 fi
-if grep -nF '\S' $SHELL_FILES > "$TMP/forbidden" 2>/dev/null; then
+if grep -nF '\S' $SHELL_FILES >"$TMP/forbidden" 2>/dev/null; then
 	bad "no \S shorthand in patterns"
 	sed 's/^/     | /' "$TMP/forbidden"
 else
@@ -243,7 +250,7 @@ expect_no_file "no @WKS@ marker left in installed muttrc" "$PREFIX/share/mutt-wi
 expect_file "gpg-wks-client resolved in installed muttrc" "$PREFIX/share/mutt-wizard/mutt-wizard.muttrc" 'gpg-wks-client'
 expect_file "prefix substituted in installed muttrc" "$PREFIX/share/mutt-wizard/mutt-wizard.muttrc" "$PREFIX/share/mutt-wizard/mailcap"
 expect_file "prefix substituted in installed mailcap" "$PREFIX/share/mutt-wizard/mailcap" "$PREFIX/lib/mutt-wizard/openfile"
-expect "installed files carry expected permissions" test "$(ls -l "$PREFIX/bin/mw" | cut -c4)" = "x"
+expect "installed files carry expected permissions" test -x "$PREFIX/bin/mw"
 
 ############################################################
 section "mw: adding accounts"
@@ -281,7 +288,7 @@ expect "imapnotify config created" test -f "$H1/.config/imapnotify/user@example.
 expect "urlview config created" test -f "$H1/.urlview"
 expect "config files are not group/world readable" sh -c 'stat -c "%a" "$1" | grep -qE "^[67]00$"' x "$MUTTRC"
 
-mw "$H1" -l > "$TMP/cap.out" 2>/dev/null
+mw "$H1" -l >"$TMP/cap.out" 2>/dev/null
 expect "mw lists the added account" grep -q user@example.com "$TMP/cap.out"
 expect "second account gets number i2" \
 	mw "$H1" -a second@example.com -f -x s3cret -i mail2.example.com -s smtp.example.com
@@ -403,18 +410,18 @@ expect_file "muttrc regenerated with i1 macro" "$H10/.config/mutt/muttrc" 'macro
 expect_file "muttrc regenerated with i2 macro" "$H10/.config/mutt/muttrc" 'macro index,pager i2'
 expect_file "default account sourced first" "$H10/.config/mutt/muttrc" "source $H10/.config/mutt/accounts/one@example.com.muttrc"
 expect_file "all accounts still sourced" "$H10/.config/mutt/muttrc" 'two@example.com.muttrc'
-expect "reorder tempfile cleaned up" sh -c 'test -z "$(ls -A "$1" 2>/dev/null)"' x "$TMP/mwtmp"
+expect "reorder tempfile cleaned up" sh -c 'test -z "$(find "$1" -type f -print 2>/dev/null)"' x "$TMP/mwtmp"
 
 ############################################################
 section "mailsync: syncing and notifications"
 ############################################################
 
 H11=$(mkhome "$TMP/h11")
-cat > "$H11/.mbsyncrc" <<'EOF'
+cat >"$H11/.mbsyncrc" <<'EOF'
 Channel imap@example.com
 EOF
 mkdir -p "$H11/.config/mpop"
-cat > "$H11/.config/mpop/config" <<'EOF'
+cat >"$H11/.config/mpop/config" <<'EOF'
 account pop@example.com
 host pop.example.com
 EOF
@@ -438,7 +445,7 @@ expect_file "POP mail detected" "$NOTIFY_LOG" 'POP hello pop@example.com'
 expect_status "mailsync fails for unknown account" 1 mailsync "$H11" nope@example.com </dev/null
 
 H12=$(mkhome "$TMP/h12")
-cat > "$H12/.mbsyncrc" <<'EOF'
+cat >"$H12/.mbsyncrc" <<'EOF'
 Channel locked@example.com
 EOF
 MW_TEST_GPG_FAIL=1 expect_status "mailsync bails out when GPG is locked" 1 \
@@ -450,10 +457,10 @@ section "mailsync: XDG_DATA_HOME from .profile"
 ############################################################
 
 H13=$(mkhome "$TMP/h13")
-cat > "$H13/.mbsyncrc" <<'EOF'
+cat >"$H13/.mbsyncrc" <<'EOF'
 Channel xdg@example.com
 EOF
-printf 'export XDG_DATA_HOME=%s/maildata\n' "$H13" > "$H13/.profile"
+printf 'export XDG_DATA_HOME=%s/maildata\n' "$H13" >"$H13/.profile"
 NOTIFY_LOG="$H13/notify.log"
 NOTIFY_LOG="$NOTIFY_LOG" expect "mailsync honors XDG_DATA_HOME from .profile" \
 	mailsync "$H13" xdg@example.com </dev/null
@@ -464,7 +471,7 @@ section "mailsync: simulated OpenBSD"
 ############################################################
 
 H14=$(mkhome "$TMP/h14")
-cat > "$H14/.mbsyncrc" <<'EOF'
+cat >"$H14/.mbsyncrc" <<'EOF'
 Channel bsd@example.com
 EOF
 NOTIFY_LOG="$H14/notify.log"
@@ -482,7 +489,7 @@ section "openfile"
 ############################################################
 
 H15=$(mkhome "$TMP/h15")
-printf 'hello\n' > "$TMP/attach file.txt"
+printf 'hello\n' >"$TMP/attach file.txt"
 OPENED_LOG="$H15/opened.log"
 OPENED_LOG="$OPENED_LOG" expect "openfile copies and opens a file (Linux)" \
 	openfile "$H15" "$TMP/attach file.txt"
@@ -498,13 +505,13 @@ expect_file "xdg-open invoked with cached file" "$OPENED_LOG" 'attach file.txt'
 MW_TEST_OS=Darwin OPENED_LOG="$OPENED_LOG" expect "openfile uses macOS open on Darwin" \
 	openfile "$H15" "$TMP/attach file.txt"
 i=0
-while [ "$(wc -l < "$OPENED_LOG" 2>/dev/null || echo 0)" -lt 2 ] && [ "$i" -lt 10 ]; do
+while [ "$(wc -l <"$OPENED_LOG" 2>/dev/null || echo 0)" -lt 2 ] && [ "$i" -lt 10 ]; do
 	sleep 1
 	i=$((i + 1))
 done
 expect_file "macOS open recorded" "$OPENED_LOG" 'attach file.txt'
 
-OPENER=/bin/true expect "openfile honors \$OPENER" \
+OPENER=/bin/true expect 'openfile honors $OPENER' \
 	openfile "$H15" "$TMP/attach file.txt"
 
 ############################################################
