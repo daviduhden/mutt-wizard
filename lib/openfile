@@ -1,10 +1,28 @@
 #!/bin/sh
 
 # Helps open a file with xdg-open from mutt in a external program without weird side effects.
-tempdir="${XDG_CACHE_HOME:-$HOME/.cache}/mutt-wizard/files"
+# POSIX sh. Runs on Linux, macOS and OpenBSD.
+
+tempdir="${XDG_CACHE_HOME:-"$HOME/.cache"}/mutt-wizard/files"
 file="$tempdir/${1##*/}"
-[ "$(uname)" = "Darwin" ] && opener="open" || opener="setsid -f xdg-open"
-mkdir -p "$tempdir"
-cp -f "$1" "$file"
-$opener "$file" >/dev/null 2>&1
+mkdir -p "$tempdir" || exit 1
+cp -f "$1" "$file" || exit 1
+
+# Pick a file opener. $OPENER overrides everything. macOS has its own
+# `open` command; on Linux and OpenBSD xdg-open (x11/xdg-utils) is
+# preferred with gio and open as fallbacks. setsid(1) is a Linux-only
+# utility, so nohup(1) (which is POSIX) is used to detach instead.
+case "$(uname -s)" in
+	Darwin) opener="${OPENER:-open}" ;;
+	*) opener="${OPENER:-xdg-open}" ;;
+esac
+command -v "$opener" >/dev/null 2>&1 || {
+	opener=""
+	for candidate in xdg-open gio open; do
+		command -v "$candidate" >/dev/null 2>&1 && { opener="$candidate"; break; }
+	done
+}
+[ -n "$opener" ] || { echo "mutt-wizard: no opener found (xdg-open, gio, or open)." >&2; exit 1; }
+
+nohup "$opener" "$file" >/dev/null 2>&1 &
 find "${tempdir:?}" -mtime +1 -type f -delete

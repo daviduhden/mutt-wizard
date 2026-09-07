@@ -1,0 +1,13 @@
+#!/bin/sh
+# Minimal envsubst(1) replacement used by the tests: replaces $VARNAME
+# occurrences with the corresponding environment value, mirroring the
+# subset of gettext's envsubst that mutt-wizard's templates rely on.
+awk '
+{
+	while (match($0, /\$[A-Za-z_][A-Za-z0-9_]*/)) {
+		v = substr($0, RSTART + 1, RLENGTH - 1)
+		val = (v in ENVIRON) ? ENVIRON[v] : ""
+		$0 = substr($0, 1, RSTART - 1) val substr($0, RSTART + RLENGTH)
+	}
+	print
+}'

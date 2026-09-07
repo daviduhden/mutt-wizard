@@ -1,0 +1,6 @@
+#!/bin/sh
+# Mock for perl(1): the tests only feed ASCII headers through the
+# MIME-Header decoder, which is the identity function for ASCII, so a
+# simple passthrough is a faithful mock. (Real perl is in the OpenBSD
+# base system, but not installed on every Linux test host.)
+cat

@@ -1,18 +1,24 @@
-#!/bin/bash
+#!/bin/sh
+# mutt-wizard: autoconfigure email accounts for neomutt.
+# POSIX sh. Runs on Linux, macOS and OpenBSD.
+# shellcheck disable=SC2034
+# (Variables set below are consumed by envsubst when expanding the
+# share/*-temp templates, which ShellCheck cannot see.)
 
 set -a
+umask 077
 
 prefix="/usr/local"
-maildir="${XDG_DATA_HOME:-$HOME/.local/share}/mail"
+maildir="${XDG_DATA_HOME:-"$HOME/.local/share"}/mail"
 muttshare="$prefix/share/mutt-wizard"
-cachedir="${XDG_CACHE_HOME:-$HOME/.cache}/mutt-wizard"
-muttrc="${XDG_CONFIG_HOME:-$HOME/.config}/mutt/muttrc"
-accdir="${XDG_CONFIG_HOME:-$HOME/.config}/mutt/accounts"
-msmtprc="${XDG_CONFIG_HOME:-$HOME/.config}/msmtp/config"
-msmtplog="${XDG_STATE_HOME:-$HOME/.local/state}/msmtp/msmtp.log"
+cachedir="${XDG_CACHE_HOME:-"$HOME/.cache"}/mutt-wizard"
+muttrc="${XDG_CONFIG_HOME:-"$HOME/.config"}/mutt/muttrc"
+accdir="${XDG_CONFIG_HOME:-"$HOME/.config"}/mutt/accounts"
+msmtprc="${XDG_CONFIG_HOME:-"$HOME/.config"}/msmtp/config"
+msmtplog="${XDG_STATE_HOME:-"$HOME/.local/state"}/msmtp/msmtp.log"
 mbsyncrc="${MBSYNCRC:-$HOME/.mbsyncrc}"
-mpoprc="${XDG_CONFIG_HOME:-$HOME/.config}/mpop/config"
-imapnotify="${XDG_CONFIG_HOME:-$HOME/.config}/imapnotify"
+mpoprc="${XDG_CONFIG_HOME:-"$HOME/.config"}/mpop/config"
+imapnotify="${XDG_CONFIG_HOME:-"$HOME/.config"}/imapnotify"
 mpoptemp="$muttshare/mpop-temp"
 mbsynctemp="$muttshare/mbsync-temp"
 mutttemp="$muttshare/mutt-temp"
@@ -29,22 +35,69 @@ imapssl="IMAPS"
 tlsline="tls_starttls off"
 maxmes="0"
 
-alias mbsync='mbsync -c "$mbsyncrc"'
+filtertmp=""
+tempfile=""
 
-# mbsync >=1.4.0 requires "Far/Near" rather than "Master/Slave."
-mbver="$(mbsync -v)"
-mbver="${mbver#* }"
-mbver="${mbver%.*}"
-# Comparing two float numbers in bash is a pain in the butt, so we get rid of
-# dots and turn them into nice integers
-mbver="${mbver/\./}"
-if [ "${mbver}" -gt 14 ]; then
-	master="Far"
-	slave="Near"
-else
+cleanup() {
+	[ -n "$filtertmp" ] && rm -f "$filtertmp"
+	[ -n "$tempfile" ] && rm -f "$tempfile"
+}
+
+trap cleanup HUP INT TERM EXIT
+
+# rewrite FILE PROGRAM args...
+# Replace FILE's contents with the output of running PROGRAM (sed, awk, ...)
+# on it. Neither GNU sed's -i nor the BSD sed -i found on macOS and OpenBSD
+# share compatible semantics, so a temporary file in the same directory is
+# used and moved into place. Only one rewrite is in flight at a time, and
+# the temporary file is cleaned up by the exit trap.
+rewrite() {
+	file="$1"
+	shift
+	tmpdir="${file%/*}"
+	[ "$tmpdir" = "$file" ] && tmpdir="."
+	filtertmp="$(mktemp "$tmpdir/mw.XXXXXX")" || return 1
+	if "$@" "$file" >"$filtertmp"; then
+		mv -f "$filtertmp" "$file"
+		filtertmp=""
+	else
+		rm -f "$filtertmp"
+		filtertmp=""
+		return 1
+	fi
+}
+
+# delete_block FILE STARTLINE
+# Delete everything from the line exactly equal to STARTLINE up to the next
+# blank line (which is consumed) or the next "account ..." line (which is
+# kept). Used for msmtp/mpop account blocks; awk is used because sed BRE has
+# no portable alternation ("\|" is a GNU extension unavailable on OpenBSD).
+delete_block() {
+	file="$1"
+	start="$2"
+	rewrite "$file" awk -v start="$start" '
+		$0 == start { skip = 1; next }
+		skip && /^account[[:space:]]/ { skip = 0 }
+		skip && /^[[:space:]]*$/ { skip = 0; next }
+		!skip { print }
+	'
+}
+
+# isync/mbsync >= 1.4.0 requires "Far/Near" rather than "Master/Slave".
+setmbsynckw() {
 	master="Master"
 	slave="Slave"
-fi
+	command -v mbsync >/dev/null 2>&1 || return 0
+	mbver="$(mbsync -v 2>&1)" || return 0
+	mbver="${mbver#* }"
+	mbver="${mbver%% *}"
+	# Compare major.minor as an integer to avoid float arithmetic.
+	major_minor="$(echo "$mbver" | awk -F. '{ print $1 $2 }')"
+	case "$major_minor" in
+		''|*[!0-9]*) return 0 ;;
+	esac
+	[ "$major_minor" -ge 14 ] && { master="Far"; slave="Near"; }
+}
 
 for x in "/etc/ssl/certs/ca-certificates.crt" \
 	"/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" \
@@ -55,16 +108,26 @@ for x in "/etc/ssl/certs/ca-certificates.crt" \
 done || { echo "CA Certificate not found. Please install one or link it to /etc/ssl/certs/ca-certificates.crt" && exit 1; }
 
 checkbasics() {
-	command -V gpg >/dev/null 2>&1 && GPG="gpg" || GPG="gpg2"
+	command -v gpg >/dev/null 2>&1 && GPG="gpg" || GPG="gpg2"
+	command -v pass >/dev/null 2>&1 || {
+		echo "The \`pass\` password manager is required but not found in PATH." >&2
+		echo "Install it (Debian/Ubuntu: pass, Arch: pass, OpenBSD: password-store, macOS: brew install pass)." >&2
+		exit 1
+	}
+	command -v envsubst >/dev/null 2>&1 || {
+		echo "envsubst (from gettext) is required but not found in PATH." >&2
+		echo "Install it (Debian/Ubuntu: gettext, Arch: gettext, OpenBSD: gettext, macOS: brew install gettext)." >&2
+		exit 1
+	}
 	PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 	[ -r "$PASSWORD_STORE_DIR/.gpg-id" ] || {
-		echo "First run \`pass init <yourgpgemail>\` to set up a password archive."
-		echo "(If you don't already have a GPG key pair, first run \`$GPG --full-generate-key\`.)"
+		echo "First run \`pass init <yourgpgemail>\` to set up a password archive." >&2
+		echo "(If you don't already have a GPG key pair, first run \`$GPG --full-generate-key\`.)" >&2
 		exit 1
 	}
 }
 
-getaccounts() { accounts="$(find -L "$accdir" -type f 2>/dev/null | grep -o "\S*.muttrc" | sed "s|.*/\([0-9]-\)*||;s/\.muttrc$//" | nl)"; }
+getaccounts() { accounts="$(find -L "$accdir" -type f 2>/dev/null | grep -o "[^[:space:]]*\.muttrc" | sed "s|.*/\([0-9]-\)*||;s/\.muttrc$//" | nl)"; }
 
 list() { getaccounts && [ -n "$accounts" ] && echo "$accounts" || exit 1; }
 
@@ -74,6 +137,7 @@ prepmsmtp() {
 }
 
 prepmbsync() {
+	setmbsynckw
 	mkdir -p "${mbsyncrc%/*}"
 	[ -f "$mbsyncrc" ] && echo >>"$mbsyncrc"
 	envsubst <"$mbsynctemp" >>"$mbsyncrc"
@@ -85,7 +149,7 @@ prepmpop() {
 }
 
 prepimapnotify() {
-  mkdir -p "$imapnotify" ; envsubst < "$imapnotifytemp" >> "$imapnotify/$fulladdr.yaml"
+	mkdir -p "$imapnotify" ; envsubst < "$imapnotifytemp" >> "$imapnotify/$fulladdr.yaml"
 }
 
 prepmutt() {
@@ -95,11 +159,11 @@ prepmutt() {
 	! grep -q "^source.*mutt-wizard.muttrc" "$muttrc" && echo "source $muttshare/mutt-wizard.muttrc" >>"$muttrc"
 	! grep "^source.*.muttrc" "$muttrc" | grep -qv "$muttshare/mutt-wizard.muttrc" && echo "source $accdir/$fulladdr.muttrc" >>"$muttrc"
 	echo "macro index,pager i$idnum '<sync-mailbox><enter-command>source $accdir/$fulladdr.muttrc<enter><change-folder>!<enter>;<check-stats>' \"switch to $fulladdr\"" >>"$muttrc"
-	neomutt -v | grep -q lmdb && ! grep -q "^set header_cache_backend.*lmdb" "$muttrc" && echo "set header_cache_backend = \"lmdb\"" >>"$muttrc"
+	command -v neomutt >/dev/null 2>&1 && neomutt -v | grep -q lmdb && ! grep -q "^set header_cache_backend.*lmdb" "$muttrc" && echo "set header_cache_backend = \"lmdb\"" >>"$muttrc"
 }
 
 getprofiles() {
-	safename="$(echo $fulladdr | sed 's/@/_/g')"
+	safename="$(echo "$fulladdr" | sed 's/@/_/g')"
 	case "$type" in
 	online)
 		folder="imaps://$login@$imap:$iport"
@@ -117,7 +181,7 @@ getprofiles() {
 	prepmsmtp
 	prepmutt
 	prepnotmuch
-  prepimapnotify
+	prepimapnotify
 }
 
 parsedomains() {
@@ -134,44 +198,49 @@ EOF
 	iport="${iport:-$iportsugg}"
 }
 
+# Escape sed regex metacharacters (".") in an account address so that it
+# matches only itself. Email addresses contain no other BRE metacharacters.
+escaddr() {
+	printf '%s' "$fulladdr" | sed 's/\./\\&/g'
+}
+
 delete() {
 	if [ -z "${fulladdr+x}" ]; then
 		echo "Select the account you would like to delete (by number):"
 		list || exit 1
 		read -r input
-		match="^\s*$input\s\+"
+		match="^[[:space:]]*${input}[[:space:]][[:space:]]*"
+		fulladdr="$(echo "$accounts" | grep "$match" | grep -o "[^[:space:]]*@[^[:space:]]*")"
 	else
-		match="\s\+$fulladdr$"
 		getaccounts
+		esc="$(escaddr)"
+		match="[[:space:]][[:space:]]*$esc"'$'
+		fulladdr="$(echo "$accounts" | grep "$match" | grep -o "[^[:space:]]*@[^[:space:]]*")"
 	fi
 
-	fulladdr="$(echo "$accounts" | grep "$match" | grep -o "\S*@\S*")"
+	[ -z "$fulladdr" ] && { echo "That is not a valid account name."; return 1; }
 
-	[ -z "$fulladdr" ] && echo "$fulladdr is not a valid account name." && return 1
-
-	sed -ibu "/IMAPStore $fulladdr-remote$/,/# End profile/d" "$mbsyncrc" 2>/dev/null
-	rm -f "$mbsyncrc"bu
+	esc="$(escaddr)"
+	[ -f "$mbsyncrc" ] && rewrite "$mbsyncrc" sed "/IMAPStore $esc-remote\$/,/# End profile/d"
 	rm -rf "${cachedir:?}/${fulladdr:?}" "$accdir/$fulladdr.muttrc" "$accdir/"[0-9]-"$fulladdr.muttrc"
-	sed -ibu "/\([0-9]-\)\?$fulladdr.muttrc/d" "$muttrc" 2>/dev/null
-	rm -f "$muttrc"bu
-	sed -ibu "/account $fulladdr$/,/^\(\s*$\|account\)/d" "$msmtprc" 2>/dev/null
-	rm -f "$msmtprc"bu
-	sed -ibu "/account $fulladdr$/,/^\(\s*$\|account\)/d" "$mpoprc" 2>/dev/null
-	rm -f "$mpoprc"bu
+	[ -f "$muttrc" ] && rewrite "$muttrc" sed "/\([0-9]-\)\{0,1\}$esc\.muttrc/d"
+	[ -f "$msmtprc" ] && delete_block "$msmtprc" "account $fulladdr"
+	[ -f "$mpoprc" ] && delete_block "$mpoprc" "account $fulladdr"
 	pass rm -f "$passprefix$fulladdr" >/dev/null 2>&1
-	[ -n "${purge+x}" ] && safename="$(echo $fulladdr | sed 's/@/_/g')" && rm -rf "${cachedir:?}/${safename:?}" "${maildir:?}/${fulladdr:?}"
+	[ -n "${purge+x}" ] && safename="$(echo "$fulladdr" | sed 's/@/_/g')" && rm -rf "${cachedir:?}/${safename:?}" "${maildir:?}/${fulladdr:?}"
+	return 0
 }
 
 askinfo() {
 	[ -z "$fulladdr" ] && echo "Give the full email address to add:" &&
 		read -r fulladdr
-	while ! echo "$fulladdr" | grep -qE "^.+@.+\.[A-Za-z]+$"; do
+	while ! echo "$fulladdr" | grep -qE "^.+@.+\.[A-Za-z]+"'$'; do
 		echo "$fulladdr is not a valid email address. Please retype the address:"
 		read -r fulladdr
 	done
 	folder="$maildir/$fulladdr"
 	getaccounts
-	echo "$accounts" | grep -q "\s$fulladdr$" 2>/dev/null &&
+	echo "$accounts" | grep -q "[[:space:]]$fulladdr"'$' 2>/dev/null &&
 		{ echo "$fulladdr has already been added" && exit 1; }
 	{ [ -z "$imap" ] || [ -z "$smtp" ]; } && parsedomains
 	[ -z "$imap" ] && echo "Give your email server's IMAP address (excluding the port number):" &&
@@ -189,7 +258,7 @@ askinfo() {
 		insertpass
 	elif [ ! -f "$PASSWORD_STORE_DIR/$passprefix$fulladdr.gpg" ]; then
 		getpass
-    fi
+	fi
 }
 
 insertpass() {
@@ -220,27 +289,34 @@ getboxes() {
 	if [ -n "${force+x}" ]; then
 		mailboxes="$(printf "INBOX\\nDrafts\\nJunk\\nTrash\\nSent\\nArchive")"
 	else
-		info="$(curl --proxy "$proxy" --location-trusted -s -m 5 --user "$login:$(pass "$passprefix$fulladdr")" --url "${protocol:-imaps}://$imap:${iport:-993}")"
+		info="$(curl ${proxy:+--proxy "$proxy"} --location-trusted -s -m 5 --user "$login:$(pass "$passprefix$fulladdr")" --url "${protocol:-imaps}://$imap:${iport:-993}")"
 		[ -z "$info" ] && errorexit
 		mailboxes="$(echo "$info" | grep -v HasChildren | sed "s/.*\" //;s/\"//g" | tr -d '\r')"
 	fi
 	[ "$type" = "pop" ] && mailboxes="INBOX"
+	# Find the lowest unused account number.
+	idnum=1
 	for x in $(
-		sed -n "/^macro.* i[0-9] / s/\(^macro.* i\| .*\)//gp " "$muttrc" 2>/dev/null | sort -u
+		sed -n 's/^macro .* i\([0-9]\) .*/\1/p' "$muttrc" 2>/dev/null | sort -u
 		echo 0
 	); do
-		idnum=$((idnum + 1))
-		[ "$idnum" -eq "$x" ] || break
+		if [ "$idnum" -eq "$x" ]; then
+			idnum=$((idnum + 1))
+		else
+			break
+		fi
 	done
 	toappend="mailboxes $(echo "$mailboxes" | sed "s/^/\"=/;s/$/\"/;s/'/\\\'/g" | paste -sd ' ' -)"
 }
 
 finalize() {
 	echo "$toappend" >>"$accdir/$fulladdr.muttrc"
-	[ "$type" != "online" ] && echo "$mailboxes" | xargs -I {} mkdir -p "$maildir/$fulladdr/{}/cur" "$maildir/$fulladdr/{}/tmp" "$maildir/$fulladdr/{}/new"
+	if [ "$type" != "online" ] && [ -n "$mailboxes" ]; then
+		echo "$mailboxes" | xargs -I {} mkdir -p "$maildir/$fulladdr/{}/cur" "$maildir/$fulladdr/{}/tmp" "$maildir/$fulladdr/{}/new"
+	fi
 	mkdir -p "$cachedir/$safename/bodies"
 	echo "$fulladdr (account #$idnum) added successfully."
-	command -V urlview >/dev/null 2>&1 && [ ! -f "$HOME/.urlview" ] && echo "COMMAND \$BROWSER" >"$HOME/.urlview"
+	command -v urlview >/dev/null 2>&1 && [ ! -f "$HOME/.urlview" ] && echo "COMMAND \$BROWSER" >"$HOME/.urlview"
 	return 0
 }
 
@@ -251,12 +327,11 @@ prepnotmuch() {
 }
 
 togglecron() {
-	cron="$(mktemp)"
-	crontab -l >"$cron"
+	cron="$(mktemp "${TMPDIR:-/tmp}/mw.XXXXXX")" || exit 1
+	crontab -l >"$cron" 2>/dev/null
 	if grep -q mailsync "$cron"; then
 		echo "Removing automatic mailsync..."
-		sed -ibu /mailsync/d "$cron"
-		rm -f "$cron"bu
+		rewrite "$cron" sed /mailsync/d
 	else
 		echo "Adding automatic mailsync every ${cronmin:-10} minutes..."
 		echo "*/${cronmin:-10} * * * * $prefix/bin/mailsync" >>"$cron"
@@ -310,27 +385,24 @@ EOF
 }
 
 reorder() {
-	tempfile="$(mktemp -u)"
-	trap 'rm -f $tempfile' HUP INT QUIT TERM PWR EXIT
+	tempfile="$(mktemp "${TMPDIR:-/tmp}/mw.XXXXXX")" || exit 1
 	echo "# Carefully reorder these accounts with the desired numbers in the first column.
 # DO NOT reorder rows or rename the accounts in the second column." >"$tempfile"
-	sed -n "
-	/ i[0-9] / s?\(.* i\|'<sync.*/\|\.muttrc.*\)??g p
-	" "$muttrc" >>"$tempfile"
+	sed -n '/ i[0-9] / { s/.* i//g; s?'"'"'<sync.*/??g; s?\.muttrc.*??g; p; }' "$muttrc" >>"$tempfile"
 	${EDITOR:-vim} "$tempfile" || exit 1
-	sed -i -e 's/#.*//' -e '/^$/d' "$tempfile"
+	rewrite "$tempfile" sed -e 's/#.*//' -e '/^[[:space:]]*$/d'
 	default="$(sort -n "$tempfile" | head -n 1)"
 	default="${default#* }"
-	sed -ibu "
-  /.* i[0-9] .*.muttrc/d
-  /^source.*accounts.*.muttrc/d
-  " "$muttrc" 2>/dev/null
-	rm -f "$muttrc"bu
+	rewrite "$muttrc" sed \
+		-e '/.* i[0-9] .*.muttrc/d' \
+		-e '/^source.*accounts.*.muttrc/d'
 	awk -v a="$accdir" -v d="$default" ' BEGIN { print "source "a"/"d".muttrc" }
 		{
 		print "macro index,pager i"$1" '\''<sync-mailbox><enter-command>source "a"/"$2".muttrc<enter><change-folder>!<enter>;<check-stats>'\'' \"switch to "$2"\""
 		}
 	' "$tempfile" >>"$muttrc"
+	rm -f "$tempfile"
+	tempfile=""
 }
 
 while getopts "rfpXlhodTYD:y:i:I:s:S:u:a:n:P:x:m:t:R:" o; do case "${o}" in
@@ -412,7 +484,7 @@ while getopts "rfpXlhodTYD:y:i:I:s:S:u:a:n:P:x:m:t:R:" o; do case "${o}" in
 	T) setact toggle ;;
 	h) setact info ;;
 	\?)
-		echo "See \`$(basename $0) -h\` for possible options and help."
+		echo "See \`$(basename "$0") -h\` for possible options and help."
 		exit 1
 		;;
 	esac done
@@ -425,7 +497,7 @@ add) checkbasics && askinfo && getboxes && getprofiles && finalize ;;
 delete) delete ;;
 sync)
 	echo "\`mw -y\` and \`mw -Y\` are now deprecated and will be removed in a future update. Please switch to using \`mailsync\`."
-	mailsync $fulladdr
+	mailsync "$fulladdr"
 	;;
 toggle) togglecron ;;
 reorder) reorder ;;

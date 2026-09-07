@@ -1,0 +1,10 @@
+#!/bin/sh
+# Mock for mpop(1): creates one new mail in the account's Maildir so that
+# mailsync can detect "new mail" for the account given as the last argument.
+last=""
+for a do last="$a"; done
+account="${last##* }"
+dir="${XDG_DATA_HOME:-$HOME/.local/share}/mail/$account/INBOX/new"
+mkdir -p "$dir"
+printf 'Subject: POP hello %s\nFrom: Pop User <pop@example.org>\n\npop body\n' "$account" > "$dir/popmail-$$"
+exit 0

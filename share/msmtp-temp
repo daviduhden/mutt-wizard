@@ -6,6 +6,6 @@ user $login
 passwordeval "pass $passprefix$fulladdr"
 auth on
 tls on
-tls_trust_file	$sslcert
-logfile $msmtplog
+tls_trust_file	"$sslcert"
+logfile "$msmtplog"
 $tlsline

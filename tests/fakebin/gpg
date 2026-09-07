@@ -1,0 +1,7 @@
+#!/bin/sh
+# Mock for gpg(1): succeeds unless MW_TEST_GPG_FAIL is set, in which case
+# it always fails (simulating a locked/unavailable GPG agent).
+if [ -n "${MW_TEST_GPG_FAIL:-}" ]; then
+	exit 1
+fi
+exit 0

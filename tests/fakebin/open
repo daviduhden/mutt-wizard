@@ -1,0 +1,4 @@
+#!/bin/sh
+# Mock for macOS's open(1): records invocations in $OPENED_LOG.
+printf '%s\n' "$*" >> "${OPENED_LOG:-$HOME/opened.log}"
+exit 0

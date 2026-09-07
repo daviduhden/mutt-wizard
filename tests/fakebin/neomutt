@@ -1,0 +1,8 @@
+#!/bin/sh
+# Mock for neomutt(1): "neomutt -v" reports an lmdb-enabled build.
+case "${1:-}" in
+	-v)
+		printf 'NeoMutt 20230517\nSystem: TestOS 1.0\nConfigure options: --lmdb --notmuch\n'
+		;;
+esac
+exit 0

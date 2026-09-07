@@ -1,0 +1,4 @@
+#!/bin/sh
+# Mock for notify-send(1): records notifications in $NOTIFY_LOG.
+printf '%s\n' "$*" >> "${NOTIFY_LOG:-$HOME/notify.log}"
+exit 0

@@ -5,12 +5,12 @@ User $login
 PassCmd "pass $passprefix$fulladdr"
 AuthMechs LOGIN
 TLSType $imapssl
-CertificateFile $sslcert
+CertificateFile "$sslcert"
 
 MaildirStore $fulladdr-local
 Subfolders Verbatim
-Path $maildir/$fulladdr/
-Inbox $maildir/$fulladdr/INBOX
+Path "$maildir/$fulladdr/"
+Inbox "$maildir/$fulladdr/INBOX"
 
 Channel $fulladdr
 Expunge Both

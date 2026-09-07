@@ -28,6 +28,10 @@ Specifically, this wizard:
 
 ## Install
 
+mutt-wizard runs on Linux, macOS and OpenBSD. All of its scripts are POSIX
+`sh` and use no GNU-specific utilities, so no Bash or GNU coreutils are
+required.
+
 #### Dependencies
 
 - `neomutt` - the email client. (If you are using Gentoo GNU/Linux, you will need the `sasl` use flag to be enabled)
@@ -35,22 +39,87 @@ Specifically, this wizard:
 - `isync` - downloads and syncs the mail (required if storing IMAP mail locally).
 - `msmtp` - sends the email.
 - `pass` - safely encrypts passwords (required at install).
-- `ca-certificates` - required for SSL. Probably installed already.
-- `gettext` - writes config files. Probably installed already.
+- `gpg` (GnuPG) - used by `pass` to encrypt passwords (required).
+- `envsubst` (from `gettext`) - writes config files (required).
+- `ca-certificates` - required for SSL. Already in the OpenBSD base system as
+  `/etc/ssl/cert.pem`; on Linux it is usually installed already.
 
 **Note**: There's a chance of errors if you use a slow-release distro like
 Ubuntu, Debian, or Mint. If you get errors in `neomutt`, install the most
 recent version manually or manually remove the offending lines in the config in
-`/usr/share/mutt-wizard/mutt-wizard.muttrc`.
+`/usr/local/share/mutt-wizard/mutt-wizard.muttrc`.
 
 ```bash
 git clone https://github.com/LukeSmithxyz/mutt-wizard
 cd mutt-wizard
-sudo make install
+sudo make install # on OpenBSD: doas make install
 ```
 
+The Makefile is portable between GNU make and BSD make, so `make` on
+OpenBSD works as-is (no `gmake` needed).
+
 A user of Arch-based distros can also install the current mutt-wizard release from the AUR as
-[mutt-wizard](https://aur.archlinux.org/packages/mutt-wizard/), or the Github master branch, [mutt-wizard-git](https://aur.archlinux.org/packages/mutt-wizard-git/).
+[mutt-wizard](https://aur.archlinux.org/packages/mutt-wizard), or the Github master branch, [mutt-wizard-git](https://aur.archlinux.org/packages/mutt-wizard-git/).
+
+### OpenBSD
+
+OpenBSD is a supported platform. The scripts are plain POSIX `sh` and have
+been audited against the OpenBSD base system: no `readlink -f`, no GNU
+`sed -i`, no GNU grep extensions, no `pgrep -a`, no `setsid`, no
+`/proc`, no systemd, and no hardcoded Linux paths. Ports-installed tools
+live in `/usr/local/bin` and are located through `PATH` (and `command -v`),
+which the `mailsync` script fixes up itself when running from cron.
+
+Installation:
+
+```
+doas pkg_add neomutt curl isync msmtp password-store gnupg gettext
+doas make install
+```
+
+- `neomutt` — mail/neomutt
+- `curl` — net/curl
+- `isync` — mail/isync (mbsync)
+- `msmtp` — mail/msmtp
+- `password-store` — security/password-store (pass)
+- `gnupg` — security/gnupg (gpg; pulls in the gettext runtime that provides `envsubst`)
+- `gettext` — devel/gettext (provides `envsubst`; already installed as a dependency of gnupg)
+- CA certificates — part of the base system (`/etc/ssl/cert.pem`); no package needed
+
+Optional packages (all available in ports):
+
+- `notmuch` — mail/notmuch — index and search mail.
+- `mpop` — mail/mpop — POP3 support (`mw -p`).
+- `abook` — mail/abook — address book integration.
+- `urlview` — www/urlview — open URLs from mail.
+- `lynx` — www/lynx — view HTML mail (w3m is another option: www/w3m).
+- `mpv` — multimedia/mpv — play video/audio attachments.
+- `libnotify` — x11/libnotify — desktop notifications from `mailsync`
+  (optional; mail syncing works without it).
+- `xdg-utils` — x11/xdg-utils — `xdg-open` for opening attachments
+  (`gio open` and the `$OPENER` environment variable are honored as
+  fallbacks).
+- `goimapnotify` — mail/goimapnotify — push notifications (see below).
+
+Scheduling mail syncing works with the base-system cron: `mw -t 30` adds a
+crontab entry, `mw -t 30` again removes it. The generated job invokes
+`/usr/local/bin/mailsync`, and the script re-establishes a sane `PATH`
+itself, so no cron-specific environment setup is needed.
+
+Known OpenBSD specifics:
+
+- Desktop notifications rely on `notify-send` (libnotify) and a D-Bus
+  session; without them `mailsync` silently skips notifications.
+- `gpg-wks-client` is resolved at install time; OpenBSD's gnupg port
+  installs it into `/usr/local/bin`, where it is found automatically.
+- On OpenBSD, `/etc/ssl/cert.pem` is used as the certificate bundle for
+  mbsync/msmtp instead of the various Linux paths.
+
+**Compatibility status**: the OpenBSD compatibility work was developed and
+verified through static analysis from Linux (POSIX conformance, the OpenBSD
+man pages, and the OpenBSD ports tree), plus mocked platform tests. It has
+*not* been executed on an actual OpenBSD system; OpenBSD-specific branches
+are exercised in the test suite through a mocked `uname`.
 
 ### Optional Dependencies
 
@@ -59,6 +128,7 @@ A user of Arch-based distros can also install the current mutt-wizard release fr
 - `pam-gnupg` - Automatically logs you into your GPG key on login so you will
   never need to input your password once logged on to your system. Check the
   repo and directions out [here](https://github.com/cruegge/pam-gnupg).
+  (Linux/PAM only.)
 - `lynx` - view HTML email in neomutt.
 - `notmuch` - index and search mail. Install it and run `notmuch setup`, tell
   it that your mail is in `~/.local/share/mail/` (although `mw` will do this
@@ -68,8 +138,7 @@ A user of Arch-based distros can also install the current mutt-wizard release fr
   to send mail to will suggest contacts that are in your abook.
 - `urlview` - outputs urls in mail to browser.
 - `cronie` - (or any other major cronjob manager) to set up automatic mail
-  syncing.
-- `mpop` - If you want to use POP protocol instead of IMAP.
+  syncing. On OpenBSD the base-system cron is used.
 
 
 ## Usage
@@ -141,6 +210,10 @@ To give you an example of the interface, here's an idea:
 ```bash
 systemctl enable --user goimapnotify@fulladdrs.service
 ```
+This systemd user-service method is Linux-only. On OpenBSD, run
+`goimapnotify` from a session startup script (e.g. `~/.xsession`) instead;
+`mw` generates the per-account configuration in
+`~/.config/imapnotify/<address>.yaml` either way.
 
 ## Additional functionality
 
@@ -183,6 +256,22 @@ systemctl enable --user goimapnotify@fulladdrs.service
 - Now handles POP protocol via `mpop` for those who prefer it (add an account
   with the `-p` option). POP configs are still generated automatically.
 
+## Testing
+
+A static-analysis and mocked functional test suite ships in `tests/`:
+
+```
+make test
+```
+
+It verifies POSIX shell syntax (with `sh -n` and dash where available),
+runs ShellCheck when installed, greps for a list of forbidden
+bashisms/GNU/Linux-only constructs, exercises a full `make install` into a
+sandboxed prefix, and then drives `mw`, `mailsync` and `openfile` end to
+end using mocked external commands (`tests/fakebin`). OpenBSD and macOS
+branches are exercised by mocking `uname` through `PATH`; no network, mail
+accounts or root privileges are required.
+
 ## Help the Project!
 
 
@@ -204,7 +293,8 @@ systemctl enable --user goimapnotify@fulladdrs.service
 - Each of the accounts that mutt-wizard generates will have custom settings set
   in a separate file in `accounts/`. You can edit these freely if you want to
   tinker with settings specific to an account.
-- In `/usr/share/mutt-wizard` are several global config files, including
+- In `/usr/local/share/mutt-wizard` (or `$PREFIX/share/mutt-wizard` if you
+  installed with a custom prefix) are several global config files, including
   `mutt-wizard`'s default settings. You can override this in your `muttrc` if
   you wish.
 
