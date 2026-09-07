@@ -42,6 +42,30 @@ mailsync
 gives notifications on the arrival of new mail by default, this can be diabled by setting the variable
 .I
 MAILSYNC_MUTE=1.
+.PP
+mailsync is a POSIX
+.I sh
+script that runs on Linux, macOS and OpenBSD. Because it is meant to run as
+a cron job (see
+.I mw -t),
+it re-establishes a usable
+.I PATH
+(its own directory plus
+.I /usr/local/bin)
+itself instead of relying on the cron environment. The same applies to the
+D-Bus session bus address, which is reconstructed from
+.I $XDG_RUNTIME_DIR/bus
+or
+.I /run/user/UID/bus
+when one exists and none is exported.
+.PP
+Desktop notifications require
+.I notify-send
+(libnotify) and a D-Bus session; X displays are detected through
+.I /tmp/.X11-unix,
+which works for Xorg/XWayland on Linux and for Xenocara on OpenBSD. Without
+these components, mail is still synchronized; only the notifications are
+skipped.
 .SH AUTHORS
 Written by Luke Smith <luke@lukesmith.xyz> originally in 2018.
 .SH LICENSE

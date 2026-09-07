@@ -1,0 +1,3 @@
+#!/bin/sh
+# Mock for uname(1): reports the simulated OS (MW_TEST_OS), defaulting to Linux.
+printf '%s\n' "${MW_TEST_OS:-Linux}"

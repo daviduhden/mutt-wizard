@@ -1,0 +1,16 @@
+#!/bin/sh
+# Mock for crontab(1): the crontab is stored in $HOME/.crontab.
+CF="$HOME/.crontab"
+case "${1:-}" in
+	-l)
+		if [ -f "$CF" ]; then
+			cat "$CF"
+			exit 0
+		fi
+		exit 1
+		;;
+	*)
+		cp "$1" "$CF"
+		exit $?
+		;;
+esac

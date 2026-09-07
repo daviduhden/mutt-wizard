@@ -1,0 +1,4 @@
+#!/bin/sh
+# Mock for notmuch(1): records invocations in $HOME/notmuch.log.
+printf '%s\n' "notmuch $*" >> "$HOME/notmuch.log"
+exit 0

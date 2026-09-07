@@ -6,10 +6,26 @@
 # - Runs notmuch to index new mail.
 # - This script can be set up as a cron job for automated mail syncing.
 
-# There are many arbitrary and ugly features in this script because it is
-# inherently difficult to pass environmental variables to cronjobs and other
-# issues. It also should at least be compatible with Linux (and maybe BSD) with
-# Xorg and MacOS as well.
+# This script is POSIX sh and runs on Linux, macOS and OpenBSD. It avoids
+# Linux-specific utilities so that it can be installed as a cron job on
+# OpenBSD as well (OpenBSD cron runs commands with a restricted environment).
+
+# Ensure commands installed under the local prefix (typically /usr/local,
+# where OpenBSD ports and mutt-wizard itself live) and this script's own
+# directory are on PATH even when run from a restricted cron environment.
+# This is done explicitly because cron does not source shell startup files.
+case "$0" in
+	/*) bindir="${0%/*}" ;;
+	*) bindir="" ;;
+esac
+for d in "$bindir" /usr/local/bin; do
+	[ -n "$d" ] || continue
+	case ":$PATH:" in
+		*:"$d":*) ;;
+		*) PATH="${PATH:+$PATH:}$d" ;;
+	esac
+done
+export PATH
 
 # Run only if not already running in other instance
 pgrep mbsync >/dev/null && { echo "mbsync is already running."; exit ;}
@@ -18,9 +34,9 @@ pgrep mbsync >/dev/null && { echo "mbsync is already running."; exit ;}
 # archive, notmuch and the GPG home.  This is done by searching common profile
 # files for variable assignments. This is ugly, but there are few options that
 # will work on the maximum number of machines.
-eval "$(grep -h -- \
-	"^\s*\(export \)\?\(MBSYNCRC\|MPOPRC\|PASSWORD_STORE_DIR\|PASSWORD_STORE_GPG_OPTS\|NOTMUCH_CONFIG\|GNUPGHOME\|MAILSYNC_MUTE\|XDG_CONFIG_HOME\|XDG_DATA_HOME\)=" \
-	"$HOME/.profile" "$HOME/.bash_profile" "$HOME/.zprofile"  "$HOME/.config/zsh/.zprofile" "$HOME/.zshenv" \
+eval "$(grep -hE \
+	"^[[:space:]]*(export[[:space:]]+)?(MBSYNCRC|MPOPRC|PASSWORD_STORE_DIR|PASSWORD_STORE_GPG_OPTS|NOTMUCH_CONFIG|GNUPGHOME|MAILSYNC_MUTE|XDG_CONFIG_HOME|XDG_DATA_HOME)=" \
+	"$HOME/.profile" "$HOME/.bash_profile" "$HOME/.zprofile" "$HOME/.config/zsh/.zprofile" "$HOME/.zshenv" \
 	"$HOME/.config/zsh/.zshenv" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config/zsh/.zshrc" \
 	"$HOME/.pam_environment" 2>/dev/null)"
 
@@ -29,29 +45,64 @@ tty -s || (echo "dummy" | gpg --sign --batch --pinentry-mode error -o /dev/null 
 
 export GPG_TTY="$(tty)"
 
-[ -n "$MBSYNCRC" ] && alias mbsync="mbsync -c $MBSYNCRC" || MBSYNCRC="$HOME/.mbsyncrc"
-[ -n "$MPOPRC" ] || MPOPRC="$HOME/.config/mpop/config"
+# mbsync reads its configuration from ~/.mbsyncrc or via -c; there is no
+# MBSYNCRC environment variable, so wrap it in a shell function (an alias
+# would not be expanded by all /bin/sh implementations in non-interactive
+# mode). mpop honors neither an MPOPRC environment variable, so pass the
+# configuration file explicitly with -C.
+MBSYNCRC="${MBSYNCRC:-$HOME/.mbsyncrc}"
+MPOPRC="${MPOPRC:-$HOME/.config/mpop/config}"
+mbsync() { command mbsync -c "$MBSYNCRC" "$@"; }
+mpop() { command mpop -C "$MPOPRC" "$@"; }
 
-lastrun="${XDG_CONFIG_HOME:-$HOME/.config}/mutt/.mailsynclastrun"
+lastrun="${XDG_CONFIG_HOME:-"$HOME/.config"}/mutt/.mailsynclastrun"
 
 # Settings are different for MacOS (Darwin) systems.
-case "$(uname)" in
-	Darwin) notify() { osascript -e "display notification \"$2\" with title \"$1\"" ;} ;;
-	*)
-	case "$(readlink -f /sbin/init)" in
-		*systemd*|*openrc*) export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus ;;
-	esac
-	# remember if a display server is running since `ps` doesn't always contain a display
-	pgrepoutput="$(pgrep -ax X\(\|org\|wayland\))"
-	displays="$(echo "$pgrepoutput" | grep -wo "[0-9]*:[0-9]\+" | sort -u)"
-	[ -z "$displays" ] && [ -d /tmp/.X11-unix ] && displays=$(cd /tmp/.X11-unix && for x in X*; do echo ":${x#X}"; done)
+os="$(uname -s)"
 
-	notify() { [ -n "$pgrepoutput" ] && for x in ${displays:-:0}; do
-			export DISPLAY="$x"
-			notify-send --app-name="mutt-wizard" -- "$1" "$2"
-		done ;}
-	;;
+# Decide how to send desktop notifications. This is entirely optional; mail
+# synchronization works without it. notify-send is looked up dynamically
+# (OpenBSD ships it in x11/libnotify, not in the base system).
+command -v notify-send >/dev/null 2>&1 && HAVE_NOTIFYSEND=1
+displays=""
+case "$os" in
+	Darwin)
+		# macOS notifications go through osascript.
+		;;
+	*)
+		# Linux (X11/XWayland) and OpenBSD (Xenocara) both create their
+		# X server sockets in /tmp/.X11-unix, so this works without
+		# Linux-specific process listings. Wayland-only Linux desktops
+		# without XWayland simply skip notifications; sync still works.
+		[ -d /tmp/.X11-unix ] && displays="$(cd /tmp/.X11-unix 2>/dev/null && for x in X*; do [ -S "$x" ] && echo ":${x#X}"; done)"
+		;;
 esac
+
+# If no DBUS session bus address is exported (common under cron), use the
+# user's session bus socket if one exists. On OpenBSD there is no
+# /run/user by default; users there get the address from their own
+# environment instead, and we only override it when a socket really exists.
+[ -n "$DBUS_SESSION_BUS_ADDRESS" ] || {
+	if [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+		DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+	elif [ -S "/run/user/$(id -u)/bus" ]; then
+		DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+	fi
+	export DBUS_SESSION_BUS_ADDRESS
+}
+
+notify() { # $1 = title, $2 = body
+	case "$os" in
+		Darwin) osascript -e "display notification \"$2\" with title \"$1\"" ;;
+		*)
+			[ -n "$HAVE_NOTIFYSEND" ] || return 0
+			[ -n "$displays" ] || displays=":0"
+			for x in $displays; do
+				DISPLAY="$x" notify-send --app-name="mutt-wizard" -- "$1" "$2"
+			done
+			;;
+	esac
+}
 
 # Check account for new mail. Notify if there is new content.
 syncandnotify() {
@@ -60,17 +111,17 @@ syncandnotify() {
 		pop) mpop -q "$2" ;;
 	esac || return 1
 	new=$(find\
-		"$HOME/.local/share/mail/$2/"[Ii][Nn][Bb][Oo][Xx]/new/ \
-		"$HOME/.local/share/mail/$2/"[Ii][Nn][Bb][Oo][Xx]/cur/ \
+		"$maildir/$2/"[Ii][Nn][Bb][Oo][Xx]/new/ \
+		"$maildir/$2/"[Ii][Nn][Bb][Oo][Xx]/cur/ \
 		-type f -newer "$lastrun" 2> /dev/null)
-	newcount=$(echo "$new" | sed '/^\s*$/d' | wc -l)
+	newcount=$(echo "$new" | sed '/^[[:space:]]*$/d' | wc -l)
 	case 1 in
 		$((newcount > 5)) )
-			echo "$newcount new mails for $2." >/dev/tty
+			tty -s 2>/dev/null && echo "$newcount new mails for $2." >/dev/tty
 			[ -z "$MAILSYNC_MUTE" ] && notify "New Mail!" "📬 $newcount new mails in \`$2\` account."
 			;;
 		$((newcount > 0)) )
-			echo "$newcount new mail(s) for $2." >/dev/tty
+			tty -s 2>/dev/null && echo "$newcount new mail(s) for $2." >/dev/tty
 			[ -z "$MAILSYNC_MUTE" ] &&
 			for file in $new; do
 				# Extract and decode subject and sender from mail.
@@ -87,7 +138,9 @@ syncandnotify() {
 esac
 }
 
-allaccounts="$(grep -hs "^\(Channel\|account\)" "$MBSYNCRC" "$MPOPRC")"
+maildir="${XDG_DATA_HOME:-"$HOME/.local/share"}/mail"
+
+allaccounts="$(grep -Ehs "^(Channel|account)" "$MBSYNCRC" "$MPOPRC" 2>/dev/null)"
 
 # Get accounts to sync. All if no argument. Prefix with `error` if non-existent.
 IFS='
@@ -129,7 +182,10 @@ done
 # Abort if no account sync succeeded
 [ "$count" -gt "$failed" ] || exit 1
 
-notmuch new --quiet
+if command -v notmuch >/dev/null 2>&1; then
+	notmuch new --quiet
+fi
 
-#Create a touch file that indicates the time of the last run of mailsync
+# Create a touch file that indicates the time of the last run of mailsync
+mkdir -p "${lastrun%/*}"
 touch "$lastrun"

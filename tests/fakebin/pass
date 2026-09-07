@@ -1,0 +1,14 @@
+#!/bin/sh
+# Mock for pass(1): a tiny password store backed by plain files.
+PSD="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+name=""
+for a do name="$a"; done
+case "${1:-}" in
+	rm) rm -f "$PSD/$name.gpg"; exit 0 ;;
+	insert)
+		mkdir -p "$PSD"
+		cat > "$PSD/$name.gpg"
+		;;
+	*) cat "$PSD/$name.gpg" 2>/dev/null ;;
+esac
+exit 0

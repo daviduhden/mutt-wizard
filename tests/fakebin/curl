@@ -1,0 +1,12 @@
+#!/bin/sh
+# Mock for curl(1): returns an IMAP LIST response with typical mailboxes.
+cat <<'EOF'
+* LIST (\Noselect) "/" "[Gmail]"
+* LIST () "/" "Archive"
+* LIST () "/" "Drafts"
+* LIST () "/" "INBOX"
+* LIST () "/" "Junk"
+* LIST () "/" "Sent"
+* LIST () "/" "Trash"
+EOF
+exit 0

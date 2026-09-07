@@ -1,0 +1,17 @@
+#!/bin/sh
+# Mock for mbsync(1).
+# - "mbsync -v" prints a version (configurable via MW_MBSYNC_VERSION).
+# - Any sync invocation creates one new mail in the channel's Maildir so
+#   that mailsync can detect "new mail" for the account given as the last
+#   argument.
+if [ "${1:-}" = "-v" ] || [ "${1:-}" = "--version" ]; then
+	printf '%s\n' "${MW_MBSYNC_VERSION:-mbsync 1.4.4}"
+	exit 0
+fi
+last=""
+for a do last="$a"; done
+channel="${last##* }"
+dir="${XDG_DATA_HOME:-$HOME/.local/share}/mail/$channel/INBOX/new"
+mkdir -p "$dir"
+printf 'Subject: Hello %s\nFrom: Test User <test@example.org>\n\nHello body\n' "$channel" > "$dir/testmail-$$"
+exit 0

@@ -179,6 +179,67 @@ and
 variables in your
 .I
 gpg-agent.conf.
+.SH PORTABILITY
+mutt-wizard runs on Linux, macOS and OpenBSD. All scripts are POSIX
+.I sh
+and deliberately avoid GNU-specific utilities: no Bash is required, no GNU
+.I sed -i,
+no
+.I readlink -f,
+no GNU grep extensions, no
+.I pgrep -a,
+no
+.I setsid,
+no
+.I /proc
+access and no systemd integration. Commands installed by the system (or by ports, under
+.I /usr/local/bin
+on OpenBSD) are located through
+.I PATH
+and
+.I command -v
+rather than hard-coded paths.
+.PP
+The Makefile works with both GNU make and BSD make, so on OpenBSD plain
+.I make install
+(with
+.I doas)
+is sufficient.
+.PP
+Automatic mail syncing uses the user's crontab
+.RI ( mw
+.B -t
+.IR minutes ),
+which works with the base-system cron on OpenBSD as well as with Vixie cron
+derivatives on Linux. The generated cron job invokes
+.I $prefix/bin/mailsync;
+the
+.I mailsync
+script re-establishes a usable
+.I PATH
+itself, so a restricted cron environment is not a problem.
+.PP
+Desktop notifications from
+.I mailsync
+require
+.I notify-send
+(part of libnotify; optional) and a D-Bus session bus. Without them, mail
+synchronization simply continues without notifications.
+.PP
+On OpenBSD, the CA certificate bundle
+.I /etc/ssl/cert.pem
+from the base system is used, and
+.I gpg-wks-client
+is found at
+.I /usr/local/bin
+from the gnupg port. Required packages: neomutt, curl, isync, msmtp,
+password-store (pass), gnupg and gettext (for envsubst). Optional: notmuch,
+mpop, abook, urlview, lynx or w3m, mpv, libnotify, xdg-utils, goimapnotify.
+.PP
+The OpenBSD support was developed and verified through static analysis from
+Linux, against the POSIX specification, the OpenBSD manual pages and the
+OpenBSD ports tree, plus mocked platform tests. It has not been executed on
+an actual OpenBSD system and still awaits real-world validation there.
 .SH MUTT-WIZARD'S NEOMUTT CONFIGURATION
 Here is a list of not only mutt-wizard's particular defaults, but what you need to get the most out of email accounts configured with mutt-wizard.
 .TP
