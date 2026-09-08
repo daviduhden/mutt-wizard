@@ -1,7 +1,5 @@
 # mutt-wizard
 
-https://muttwizard.com/
-
 Get this great stuff without effort:
 
 - A full-featured and autoconfigured email client on the terminal built with neomutt
@@ -59,7 +57,8 @@ The Makefile is portable between GNU make and BSD make, so `make` on
 OpenBSD works as-is (no `gmake` needed).
 
 A user of Arch-based distros can also install the current mutt-wizard release from the AUR as
-[mutt-wizard](https://aur.archlinux.org/packages/mutt-wizard), or the Github master branch, [mutt-wizard-git](https://aur.archlinux.org/packages/mutt-wizard-git/).
+[mutt-wizard](https://aur.archlinux.org/packages/mutt-wizard), or the Github master branch,
+[mutt-wizard-git](https://aur.archlinux.org/packages/mutt-wizard-git/).
 
 ### OpenBSD
 
@@ -115,12 +114,6 @@ Known OpenBSD specifics:
 - On OpenBSD, `/etc/ssl/cert.pem` is used as the certificate bundle for
   mbsync/msmtp instead of the various Linux paths.
 
-**Compatibility status**: the OpenBSD compatibility work was developed and
-verified through static analysis from Linux (POSIX conformance, the OpenBSD
-man pages, and the OpenBSD ports tree), plus mocked platform tests. It has
-*not* been executed on an actual OpenBSD system; OpenBSD-specific branches
-are exercised in the test suite through a mocked `uname`.
-
 ### Optional Dependencies
 
 - `goimapnotify` - required for push notifications.
@@ -140,7 +133,6 @@ are exercised in the test suite through a mocked `uname`.
 - `cronie` - (or any other major cronjob manager) to set up automatic mail
   syncing. On OpenBSD the base-system cron is used.
 
-
 ## Usage
 
 The mutt-wizard runs via the command `mw`. Once setup is complete, you'll use
@@ -154,7 +146,8 @@ The mutt-wizard runs via the command `mw`. Once setup is complete, you'll use
 - `mw -T` -- toggle mailsync without specifying minutes (default is 10)
 - `mw -r` -- reorder account shortcut numbers
 - `pass edit mw-your@email.com` -- revise an account's password
-- `mailsync` -- sync all configured email accounts. Also gives notifications of new mail and indexes new mail with notmuch silently.
+- `mailsync` -- sync all configured email accounts. Also gives notifications of new mail
+and indexes new mail with notmuch silently.
 - `mailsync your@email.com` -- sync a particular (or several) email account(s).
 
 ### Options usable when adding an account
