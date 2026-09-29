@@ -1,0 +1,37 @@
+name: OpenBSD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test on OpenBSD
+        uses: vmactions/openbsd-vm@v1
+        with:
+          # Newest OpenBSD 7.x; the action defaults to 7.9.
+          release: "7"
+          sync: rsync
+          copyback: false
+          prepare: |
+            uname -a
+          run: |
+            set -eu
+
+            echo "== environment =="
+            uname -a
+            id
+            make --version 2>&1 | head -n 1 || true
+
+            echo "== test suite =="
+            make test

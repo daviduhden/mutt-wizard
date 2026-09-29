@@ -286,7 +286,15 @@ expect "header cache directory created" test -d "$H1/.cache/mutt-wizard/user_exa
 expect "notmuch config created" test -f "$H1/.notmuch-config"
 expect "imapnotify config created" test -f "$H1/.config/imapnotify/user@example.com.yaml"
 expect "urlview config created" test -f "$H1/.urlview"
-expect "config files are not group/world readable" sh -c 'stat -c "%a" "$1" | grep -qE "^[67]00$"' x "$MUTTRC"
+# Portable permission check: stat(1) flags differ between GNU (-c) and
+# BSD (-f), so inspect the mode field from ls(1) instead.
+expect "config files are not group/world readable" sh -c '
+	mode=$(ls -l "$1" | cut -c1-10)
+	case "$mode" in
+	-rw------- | -rwx------) exit 0 ;;
+	*) exit 1 ;;
+	esac
+' x "$MUTTRC"
 
 mw "$H1" -l >"$TMP/cap.out" 2>/dev/null
 expect "mw lists the added account" grep -q user@example.com "$TMP/cap.out"
@@ -405,7 +413,8 @@ H10=$(mkhome "$TMP/h10")
 mw "$H10" -a one@example.com -f -x p -i i1.example.com -s s1.example.com >/dev/null 2>&1
 mw "$H10" -a two@example.com -f -x p -i i2.example.com -s s2.example.com >/dev/null 2>&1
 mkdir -p "$TMP/mwtmp"
-EDITOR=/bin/true TMPDIR="$TMP/mwtmp" expect "mw -r reorders accounts" mw "$H10" -r
+# `true` is resolved through PATH: /bin/true does not exist on OpenBSD.
+EDITOR=true TMPDIR="$TMP/mwtmp" expect "mw -r reorders accounts" mw "$H10" -r
 expect_file "muttrc regenerated with i1 macro" "$H10/.config/mutt/muttrc" 'macro index,pager i1'
 expect_file "muttrc regenerated with i2 macro" "$H10/.config/mutt/muttrc" 'macro index,pager i2'
 expect_file "default account sourced first" "$H10/.config/mutt/muttrc" "source $H10/.config/mutt/accounts/one@example.com.muttrc"
@@ -511,7 +520,7 @@ while [ "$(wc -l <"$OPENED_LOG" 2>/dev/null || echo 0)" -lt 2 ] && [ "$i" -lt 10
 done
 expect_file "macOS open recorded" "$OPENED_LOG" 'attach file.txt'
 
-OPENER=/bin/true expect 'openfile honors $OPENER' \
+OPENER=true expect 'openfile honors $OPENER' \
 	openfile "$H15" "$TMP/attach file.txt"
 
 ############################################################
