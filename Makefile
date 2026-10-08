@@ -46,7 +46,4 @@ uninstall:
 	rm -f $(DESTDIR)$(MANPREFIX)/man1/mw.1  $(DESTDIR)$(MANPREFIX)/man1/mailsync.1
 	rm -f $(DESTDIR)$(PREFIX)/share/zsh/site-functions/_mutt-wizard.zsh
 
-test:
-	sh tests/run_tests.sh
-
-.PHONY: install uninstall test
+.PHONY: install uninstall

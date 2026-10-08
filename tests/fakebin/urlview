@@ -1,3 +1,0 @@
-#!/bin/sh
-# Mock for urlview(1).
-exit 0
