@@ -256,22 +256,6 @@ This systemd user-service method is Linux-only. On OpenBSD, run
 - Now handles POP protocol via `mpop` for those who prefer it (add an account
   with the `-p` option). POP configs are still generated automatically.
 
-## Testing
-
-A static-analysis and mocked functional test suite is included in `tests/`:
-
-```
-make test
-```
-
-It verifies POSIX shell syntax (with `sh -n` and dash where available), runs
-ShellCheck when installed, greps for a list of forbidden bashisms/GNU/Linux-
-only constructs, exercises a full `make install` into a sandboxed prefix, and
-then drives `mw`, `mailsync` and `openfile` end to end using mocked external
-commands (`tests/fakebin`). OpenBSD and macOS branches are exercised by
-mocking `uname` through `PATH`; no network, mail accounts or root privileges
-are required.
-
 ## Contributing
 
 - Test mutt-wizard on unusual machines and email setups and report any errors
