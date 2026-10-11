@@ -1,4 +1,4 @@
-.TH MW 1 mutt-wizard
+.TH MW 1 "2026-10-11" "mutt-wizard"
 .SH NAME
 mw \- mutt-wizard \- autoconfigure email accounts for neomutt and isync
 .SH SYNOPSIS
@@ -31,10 +31,14 @@ pick an already configured account and remove its configuration
 remove a configured account without confirmation
 .TP
 .B -y your@email.com
-download and upload mail for an email account
+download and upload mail for an email account. Deprecated: use
+.I mailsync your@email.com
+instead.
 .TP
 .B -Y
-sync all email accounts
+sync all email accounts. Deprecated: use
+.I mailsync
+instead.
 .TP
 .B -t 15
 toggle a cronjob that syncs your mail every 15 minutes (or any other number under 60)

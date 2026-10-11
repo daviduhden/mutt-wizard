@@ -45,9 +45,9 @@ notmuchtemp="$muttshare/notmuch-temp"
 imapnotifytemp="$muttshare/imapnotify-temp"
 # With the use of templates, it's impossible to use parameter substitution.
 # Therefore, some default variables that might be otherwise overwritten are set
-# here.
-iport="993"
-sport="465"
+# here.  The port defaults (993/465) are *not* set here: they must remain unset
+# so that parsedomains() can fill them in from domains.csv, and so that `-p`
+# can apply its POP3 default of 995.  They are resolved in askinfo() instead.
 imapssl="IMAPS"
 tlsline="tls_starttls off"
 maxmes="0"
@@ -121,8 +121,7 @@ setmbsynckw() {
 for x in "/etc/ssl/certs/ca-certificates.crt" \
 	"/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" \
 	"/etc/ssl/ca-bundle.pem" "/etc/pki/tls/cacert.pem" \
-	"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" \
-	"/usr/local/share/ca-certificates/"; do
+	"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"; do
 	[ -f "$x" ] && sslcert="$x" && break
 done || { echo "CA Certificate not found. Please install one or link it to /etc/ssl/certs/ca-certificates.crt" && exit 1; }
 
@@ -185,7 +184,13 @@ getprofiles() {
 	safename="$(echo "$fulladdr" | sed 's/@/_/g')"
 	case "$type" in
 	online)
-		folder="imaps://$login@$imap:$iport"
+		# Port 993 uses implicit TLS (imaps://), other ports are reached
+		# with the plain scheme and upgraded via STARTTLS, which
+		# online-temp.muttrc enables with ssl_starttls/ssl_force_tls.
+		case "$iport" in
+		993) folder="imaps://$login@$imap:$iport" ;;
+		*) folder="imap://$login@$imap:$iport" ;;
+		esac
 		extra="$(envsubst <"$onlinetemp")"
 		;;
 	pop) prepmpop ;;
@@ -200,27 +205,45 @@ getprofiles() {
 	prepmsmtp
 	prepmutt
 	prepnotmuch
-	prepimapnotify
+	# goimapnotify speaks IMAP, so a POP3 account must not get a config file.
+	[ "$type" = "pop" ] || prepimapnotify
 }
 
 parsedomains() {
-	serverinfo="$(grep "^${fulladdr#*@}" "$muttshare/domains.csv" 2>/dev/null)"
-
-	[ -z "$serverinfo" ] && serverinfo="$(grep "$(echo "${fulladdr#*@}" | sed "s/\.[^\.]*$/\.\\\*/")" "$muttshare/domains.csv" 2>/dev/null)"
+	# Look the domain up in domains.csv. Match the exact domain first, then a
+	# trailing ".*" wildcard (e.g. "gmx.*", which also matches subdomains such
+	# as "student.gmx.net"). Both matches are anchored so a domain is never
+	# confused with a longer one that merely contains it (e.g. notgmx.net).
+	serverinfo="$(awk -F, -v dom="${fulladdr#*@}" '
+		function key_regex(s,   r) {
+			r = s
+			gsub(/\./, "\\.", r)
+			gsub(/\*/, ".*", r)
+			return r
+		}
+		NR == 1 { next }
+		{
+			key = tolower($1)
+			if (key == tolower(dom)) { print; exit }
+			if (index(key, "*") && tolower(dom) ~ ("(^|\\.)" key_regex(key) "$")) { print; exit }
+		}
+	' "$muttshare/domains.csv" 2>/dev/null)"
 
 	IFS=, read -r service imapsugg iportsugg smtpsugg sportsugg <<EOF
 $serverinfo
 EOF
-	imap="${imap:-$imapsugg}"
+	# A POP3 lookup must not reuse the suggested IMAP host; leave it unset so
+	# that askinfo() prompts for the POP3 server instead.
+	[ "$type" = "pop" ] || imap="${imap:-$imapsugg}"
 	smtp="${smtp:-$smtpsugg}"
 	sport="${sport:-$sportsugg}"
 	iport="${iport:-$iportsugg}"
 }
 
-# Escape sed regex metacharacters (".") in an account address so that it
-# matches only itself. Email addresses contain no other BRE metacharacters.
+# Escape the metacharacters of the basic regular expressions used below by
+# delete(), so that an account address matches only itself.
 escaddr() {
-	printf '%s' "$fulladdr" | sed 's/\./\\&/g'
+	printf '%s' "$fulladdr" | sed 's/[][\\.*^$]/\\&/g'
 }
 
 delete() {
@@ -240,13 +263,18 @@ delete() {
 	[ -z "$fulladdr" ] && { echo "That is not a valid account name."; return 1; }
 
 	esc="$(escaddr)"
+	# The header/body cache is keyed by the address with "@" replaced by "_"
+	# (see getprofiles()), not by the raw address, so compute it here too.
+	safename="$(echo "$fulladdr" | sed 's/@/_/g')"
 	[ -f "$mbsyncrc" ] && rewrite "$mbsyncrc" sed "/IMAPStore $esc-remote\$/,/# End profile/d"
-	rm -rf "${cachedir:?}/${fulladdr:?}" "$accdir/$fulladdr.muttrc" "$accdir/"[0-9]-"$fulladdr.muttrc"
-	[ -f "$muttrc" ] && rewrite "$muttrc" sed "/\([0-9]-\)\{0,1\}$esc\.muttrc/d"
+	rm -rf "${cachedir:?}/${safename:?}" "$accdir/$fulladdr.muttrc" "$accdir/"[0-9]-"$fulladdr.muttrc"
+	# Match only the account path (preceded by "/") so that an address that is
+	# a suffix of another (e.g. foo@bar.com vs. xfoo@bar.com) is not deleted.
+	[ -f "$muttrc" ] && rewrite "$muttrc" sed "/\/\([0-9]-\)\{0,1\}$esc\.muttrc/d"
 	[ -f "$msmtprc" ] && delete_block "$msmtprc" "account $fulladdr"
 	[ -f "$mpoprc" ] && delete_block "$mpoprc" "account $fulladdr"
 	pass rm -f "$passprefix$fulladdr" >/dev/null 2>&1
-	[ -n "${purge+x}" ] && safename="$(echo "$fulladdr" | sed 's/@/_/g')" && rm -rf "${cachedir:?}/${safename:?}" "${maildir:?}/${fulladdr:?}"
+	[ -n "${purge+x}" ] && rm -rf "${maildir:?}/${fulladdr:?}"
 	return 0
 }
 
@@ -259,15 +287,27 @@ askinfo() {
 	done
 	folder="$maildir/$fulladdr"
 	getaccounts
+	# Account switching is bound to i1..i9, so refuse a tenth account before
+	# the password is stored.
+	if [ -n "$accounts" ] && [ "$(printf '%s\n' "$accounts" | wc -l)" -ge 9 ]; then
+		echo "mutt-wizard supports at most nine accounts; remove one before adding another." >&2
+		exit 1
+	fi
 	echo "$accounts" | grep -q "[[:space:]]$fulladdr"'$' 2>/dev/null &&
 		{ echo "$fulladdr has already been added" && exit 1; }
 	{ [ -z "$imap" ] || [ -z "$smtp" ]; } && parsedomains
-	[ -z "$imap" ] && echo "Give your email server's IMAP address (excluding the port number):" &&
+	protolabel="IMAP"
+	[ "$type" = "pop" ] && protolabel="POP3"
+	[ -z "$imap" ] && echo "Give your email server's $protolabel address (excluding the port number):" &&
 		read -r imap
 	[ -z "$smtp" ] && echo "Give your email server's SMTP address (excluding the port number):" &&
 		read -r smtp
+	# Resolve the ports now that the server suggestions (if any) have been
+	# read.  These must be defined before the templates are expanded.
+	iport="${iport:-993}"
+	sport="${sport:-465}"
 	case $sport in
-	587) tlsline="# tls_starttls" ;;
+	587|25|2525) tlsline="# tls_starttls" ;;
 	esac
 	[ -z "$realname" ] && realname="${fulladdr%%@*}"
 	[ -z "$passprefix" ] && passprefix=""
@@ -278,10 +318,13 @@ askinfo() {
 	elif [ ! -f "$PASSWORD_STORE_DIR/$passprefix$fulladdr.gpg" ]; then
 		getpass
 	fi
+	# Never leave the plain-text password in the exported environment: `set -a`
+	# would otherwise leak it to every child process (curl, envsubst, ...).
+	unset password
 }
 
 insertpass() {
-	printf "%s" "$password" | pass insert -fe "$passprefix$fulladdr"
+	printf "%s\n" "$password" | pass insert -fe "$passprefix$fulladdr"
 }
 
 errorexit() {
@@ -308,7 +351,21 @@ getboxes() {
 	if [ -n "${force+x}" ]; then
 		mailboxes="$(printf "INBOX\\nDrafts\\nJunk\\nTrash\\nSent\\nArchive")"
 	else
-		info="$(curl ${proxy:+--proxy "$proxy"} --location-trusted -s -m 5 --user "$login:$(pass "$passprefix$fulladdr")" --url "${protocol:-imaps}://$imap:${iport:-993}")"
+		# Port 143 speaks STARTTLS, which curl only performs on request
+		# (--ssl-reqd); port 993 uses implicit TLS via the imaps scheme.
+		case "$iport" in
+		143)
+			urlscheme="imap"
+			sslreq="--ssl-reqd"
+			;;
+		*)
+			urlscheme="${protocol:-imaps}"
+			sslreq=""
+			;;
+		esac
+		# shellcheck disable=SC2086
+		# ($sslreq is deliberately word-split into a curl argument)
+		info="$(curl ${proxy:+--proxy "$proxy"} $sslreq --location-trusted -s -m 5 --user "$login:$(pass "$passprefix$fulladdr")" --url "$urlscheme://$imap:${iport:-993}")"
 		[ -z "$info" ] && errorexit
 		mailboxes="$(echo "$info" | grep -v HasChildren | sed "s/.*\" //;s/\"//g" | tr -d '\r')"
 	fi
@@ -325,11 +382,15 @@ getboxes() {
 			break
 		fi
 	done
-	toappend="mailboxes $(echo "$mailboxes" | sed "s/^/\"=/;s/$/\"/;s/'/\\\'/g" | paste -sd ' ' -)"
+	if [ -n "$mailboxes" ]; then
+		toappend="mailboxes $(echo "$mailboxes" | sed "s/^/\"=/;s/$/\"/;s/'/\\\'/g" | paste -sd ' ' -)"
+	else
+		toappend=""
+	fi
 }
 
 finalize() {
-	echo "$toappend" >>"$accdir/$fulladdr.muttrc"
+	[ -n "$toappend" ] && echo "$toappend" >>"$accdir/$fulladdr.muttrc"
 	if [ "$type" != "online" ] && [ -n "$mailboxes" ]; then
 		echo "$mailboxes" | xargs -I {} mkdir -p "$maildir/$fulladdr/{}/cur" "$maildir/$fulladdr/{}/tmp" "$maildir/$fulladdr/{}/new"
 	fi
@@ -346,6 +407,12 @@ prepnotmuch() {
 }
 
 togglecron() {
+	case "${cronmin:-10}" in
+	*[!0-9]*) echo "Give a whole number of minutes (1-59)." >&2; exit 1 ;;
+	esac
+	cronmin="${cronmin:-10}"
+	{ [ "$cronmin" -ge 1 ] && [ "$cronmin" -le 59 ]; } ||
+		{ echo "Give a whole number of minutes (1-59)." >&2; exit 1; }
 	cron="$(mktemp "${TMPDIR:-/tmp}/mw.XXXXXX")" || exit 1
 	crontab -l >"$cron" 2>/dev/null
 	if grep -q mailsync "$cron"; then
@@ -360,8 +427,7 @@ togglecron() {
 }
 
 setact() { if [ -n "${action+x}" ] && [ "$action" != "$1" ]; then
-	echo "Running $1 with $action..."
-	echo "Incompatible options given. Only one action may be specified per run."
+	echo "Incompatible options given. Only one action may be specified per run." >&2
 	exit 1
 else
 	action="$1"
@@ -399,7 +465,7 @@ Options allowed with -a:
 NOTE: Once at least one account is added, you can run
 \`mbsync -a\` to begin downloading mail.
 
-To change an account's password, run \`pass edit '$passprefix'your@email.com\`.
+To change an account's password, run \`pass edit ${passprefix:-}your@email.com\`.
 EOF
 }
 
@@ -407,11 +473,24 @@ reorder() {
 	tempfile="$(mktemp "${TMPDIR:-/tmp}/mw.XXXXXX")" || exit 1
 	echo "# Carefully reorder these accounts with the desired numbers in the first column.
 # DO NOT reorder rows or rename the accounts in the second column." >"$tempfile"
-	sed -n '/ i[0-9] / { s/.* i//g; s?'"'"'<sync.*/??g; s?\.muttrc.*??g; p; }' "$muttrc" >>"$tempfile"
+	acclist="$(sed -n '/ i[0-9] / { s/.* i//g; s?'"'"'<sync.*/??g; s?\.muttrc.*??g; p; }' "$muttrc" 2>/dev/null)"
+	if [ -z "$acclist" ]; then
+		echo "No accounts are configured; nothing to reorder." >&2
+		rm -f "$tempfile"
+		tempfile=""
+		return 1
+	fi
+	printf '%s\n' "$acclist" >>"$tempfile"
 	${EDITOR:-vim} "$tempfile" || exit 1
 	rewrite "$tempfile" sed -e 's/#.*//' -e '/^[[:space:]]*$/d'
 	default="$(sort -n "$tempfile" | head -n 1)"
 	default="${default#* }"
+	if [ -z "$default" ]; then
+		echo "No accounts are configured; nothing to reorder." >&2
+		rm -f "$tempfile"
+		tempfile=""
+		return 1
+	fi
 	rewrite "$muttrc" sed \
 		-e '/.* i[0-9] .*.muttrc/d' \
 		-e '/^source.*accounts.*.muttrc/d'
@@ -516,7 +595,11 @@ add) checkbasics && askinfo && getboxes && getprofiles && finalize ;;
 delete) delete ;;
 sync)
 	echo "\`mw -y\` and \`mw -Y\` are now deprecated and will be removed in a future update. Please switch to using \`mailsync\`."
-	mailsync "$fulladdr"
+	if [ -x "$prefix/bin/mailsync" ]; then
+		"$prefix/bin/mailsync" "$fulladdr"
+	else
+		mailsync "$fulladdr"
+	fi
 	;;
 toggle) togglecron ;;
 reorder) reorder ;;

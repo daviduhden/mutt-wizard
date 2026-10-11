@@ -3,7 +3,7 @@
     "port": $iport,
     "tls": true,
     "tlsOptions": {
-            "rejectUnauthorized": false
+            "rejectUnauthorized": true
     },
     "username": "$login",
     "password": "",

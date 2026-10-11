@@ -43,8 +43,13 @@ for d in "$bindir" /usr/local/bin; do
 done
 export PATH
 
-# Run only if not already running in other instance
-pgrep mbsync >/dev/null && { echo "mbsync is already running."; exit ;}
+# Run only if not already running in other instance. Restrict the match to
+# this user so that another user's mbsync on a shared machine does not block
+# the sync, and skip the check silently if pgrep is unavailable.
+if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" mbsync >/dev/null 2>&1; then
+	echo "mbsync is already running."
+	exit
+fi
 
 # First, we have to get the right variables for the mbsync file, the pass
 # archive, notmuch and the GPG home.  This is done by searching common profile
@@ -59,8 +64,12 @@ eval "$(grep -hE \
 # For non-interactive shell (e.g. cron job) run only when the GPG key (in $GNUPGHOME or pass --homedir) is unlocked
 tty -s || (echo "dummy" | gpg --sign --batch --pinentry-mode error -o /dev/null > /dev/null 2>&1) || exit
 
-GPG_TTY="$(tty)"
-export GPG_TTY
+# Only set GPG_TTY when stdin really is a terminal; `tty` prints
+# "not a tty" to stdout when it is not, which must not end up in GPG_TTY.
+if tty -s; then
+	GPG_TTY="$(tty)"
+	export GPG_TTY
+fi
 
 # mbsync reads its configuration from ~/.mbsyncrc or via -c; there is no
 # MBSYNCRC environment variable, so wrap it in a shell function (an alias
@@ -68,11 +77,18 @@ export GPG_TTY
 # mode). mpop honors neither an MPOPRC environment variable, so pass the
 # configuration file explicitly with -C.
 MBSYNCRC="${MBSYNCRC:-$HOME/.mbsyncrc}"
-MPOPRC="${MPOPRC:-$HOME/.config/mpop/config}"
+# Keep the default in sync with `mw`, which writes the POP configuration to
+# $XDG_CONFIG_HOME/mpop/config (falling back to ~/.config). Ignoring
+# $XDG_CONFIG_HOME here would make mpop read a non-existent file.
+MPOPRC="${MPOPRC:-${XDG_CONFIG_HOME:-"$HOME/.config"}/mpop/config}"
 mbsync() { command mbsync -c "$MBSYNCRC" "$@"; }
 mpop() { command mpop -C "$MPOPRC" "$@"; }
 
 lastrun="${XDG_CONFIG_HOME:-"$HOME/.config"}/mutt/.mailsynclastrun"
+# Make sure the reference file exists so that `find -newer' works on the very
+# first run. An epoch timestamp makes freshly downloaded mail count as new
+# (a single summary notification, not one per message).
+[ -f "$lastrun" ] || { mkdir -p "${lastrun%/*}"; touch -t 197001010000 "$lastrun"; }
 
 # Settings are different for MacOS (Darwin) systems.
 os="$(uname -s)"
@@ -110,12 +126,20 @@ esac
 
 notify() { # $1 = title, $2 = body
 	case "$os" in
-		Darwin) osascript -e "display notification \"$2\" with title \"$1\"" ;;
+		Darwin)
+			# Escape backslashes and double quotes so that a crafted
+			# subject/sender cannot break out of the AppleScript string.
+			nbody="$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+			ntitle="$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+			osascript -e "display notification \"$nbody\" with title \"$ntitle\"" >/dev/null 2>&1
+			;;
 		*)
 			[ -n "$HAVE_NOTIFYSEND" ] || return 0
 			[ -n "$displays" ] || displays=":0"
 			for x in $displays; do
-				DISPLAY="$x" notify-send --app-name="mutt-wizard" -- "$1" "$2"
+				# Errors (e.g. no D-Bus session) are expected under
+				# cron; keep them out of the cron mail.
+				DISPLAY="$x" notify-send --app-name="mutt-wizard" -- "$1" "$2" >/dev/null 2>&1
 			done
 			;;
 	esac
@@ -153,7 +177,9 @@ syncandnotify() {
 				notify "📧$from:" "$subject"
 			done
 			;;
-		*) echo "No new mail for $2." ;;
+		# Keep this off stdout as well: the cron job captures stdout and
+		# would otherwise e-mail "No new mail" on every single run.
+		*) tty -s 2>/dev/null && echo "No new mail for $2." >/dev/tty ;;
 esac
 }
 
