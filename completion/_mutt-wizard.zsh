@@ -16,7 +16,9 @@ case "$state" in
 		'-Y:Sync mail for all accounts'
 		'-t:Toggle automatic mailsync every <number> minutes'
 		'-T:Toggle automatic mailsync every 10 minutes'
-		'-r:order account numbers'
+		'-r:Reorder account numbers'
+		'-R:Use a proxy server for curl'
+		'-h:Display help'
 		)
 		_describe 'flags' opts
 		;;
@@ -37,6 +39,8 @@ case "$state" in
 					-X\:"Delete an account'"'"'s local email too when deleting."
 					-o\:"Configure address, but keep mail online."
 					-f\:"Assume typical English mailboxes without attempting log-on."
+					-m\:"Maximum number of emails to be kept offline"
+					-R\:"Use a proxy server for curl"
 					))'
 				;;
 			-D|-y)

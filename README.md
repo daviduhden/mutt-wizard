@@ -155,7 +155,8 @@ mail is read with `neomutt`.
 - `mw -t 30` — toggle automatic mailsync to every 30 minutes
 - `mw -T` — toggle mailsync without specifying minutes (default is 10)
 - `mw -r` — reorder account shortcut numbers
-- `pass edit mw-your@email.com` — revise an account's password
+- `pass edit your@email.com` — revise an account's password (prepend the
+  prefix given with `-P` if one was used)
 - `mailsync` — sync all configured email accounts, notify of new mail, and
   silently index new mail with notmuch.
 - `mailsync your@email.com` — sync a particular email account (or several).
@@ -228,6 +229,10 @@ This systemd user-service method is Linux-only. On OpenBSD, run
 `goimapnotify` from a session startup script (e.g. `~/.xsession`) instead;
 `mw` generates the per-account configuration in
 `~/.config/imapnotify/<address>.yaml` either way.
+
+The generated configuration verifies the server's TLS certificate
+(`"rejectUnauthorized": true`). If your server uses a self-signed
+certificate, edit the generated YAML and set it to `false`.
 
 ## Improvements Over the Original Release
 
