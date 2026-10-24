@@ -43,26 +43,104 @@ for d in "$bindir" /usr/local/bin; do
 done
 export PATH
 
+# Hold an atomic lock for the whole run. The pgrep check below only covers
+# external mbsync/mpop processes; this lock also prevents two mailsync runs
+# from overlapping in the notification/notmuch phase.
+lockbase="${XDG_CACHE_HOME:-$HOME/.cache}/mutt-wizard"
+lockdir="$lockbase/mailsync.lock"
+mkdir -p "$lockbase" 2>/dev/null || exit 1
+if ! mkdir "$lockdir" 2>/dev/null; then
+	lockpid="$(sed -n '1p' "$lockdir/pid" 2>/dev/null)"
+	if [ -n "$lockpid" ] && kill -0 "$lockpid" 2>/dev/null; then
+		echo "mailsync is already running." >&2
+		exit
+	fi
+	rm -rf "$lockdir" 2>/dev/null
+	mkdir "$lockdir" 2>/dev/null || { echo "Could not acquire the mailsync lock." >&2; exit 1; }
+fi
+printf '%s\n' "$$" >"$lockdir/pid"
+trap 'rm -rf "$lockdir"' EXIT
+trap 'rm -rf "$lockdir"; exit 1' HUP INT TERM
+
 # Run only if not already running in other instance. Restrict the match to
 # this user so that another user's mbsync on a shared machine does not block
 # the sync, and skip the check silently if pgrep is unavailable.
-if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" mbsync >/dev/null 2>&1; then
-	echo "mbsync is already running."
-	exit
+if command -v pgrep >/dev/null 2>&1; then
+	for running in mbsync mpop; do
+		if pgrep -u "$(id -u)" "$running" >/dev/null 2>&1; then
+			echo "$running is already running." >&2
+			exit
+		fi
+	done
 fi
 
 # First, we have to get the right variables for the mbsync file, the pass
-# archive, notmuch and the GPG home.  This is done by searching common profile
+# archive, notmuch and the GPG home. This is done by searching common profile
 # files for variable assignments. This is ugly, but there are few options that
 # will work on the maximum number of machines.
-eval "$(grep -hE \
-	"^[[:space:]]*(export[[:space:]]+)?(MBSYNCRC|MPOPRC|PASSWORD_STORE_DIR|PASSWORD_STORE_GPG_OPTS|NOTMUCH_CONFIG|GNUPGHOME|MAILSYNC_MUTE|XDG_CONFIG_HOME|XDG_DATA_HOME)=" \
-	"$HOME/.profile" "$HOME/.bash_profile" "$HOME/.zprofile" "$HOME/.config/zsh/.zprofile" "$HOME/.zshenv" \
-	"$HOME/.config/zsh/.zshenv" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config/zsh/.zshrc" \
-	"$HOME/.pam_environment" 2>/dev/null)"
+#
+# profilevar LINE
+# Parse one whitelisted assignment without executing arbitrary profile code.
+# Command substitutions, separators, redirections and unbalanced quotes are
+# ignored. This is intentionally less capable than a shell parser, but cron
+# runs it unattended.
+profilevar() {
+	line="$(printf '%s' "$1" |
+		sed -e 's/^[[:space:]]*//' -e 's/^export[[:space:]][[:space:]]*//')"
+	case "$line" in
+	MBSYNCRC=*|MPOPRC=*|PASSWORD_STORE_DIR=*|PASSWORD_STORE_GPG_OPTS=*|NOTMUCH_CONFIG=*|GNUPGHOME=*|MAILSYNC_MUTE=*|XDG_CONFIG_HOME=*|XDG_DATA_HOME=*) ;;
+	*) return 0 ;;
+	esac
+	case "$line" in
+	*'`'*|*'$('*|*';'*|*'&'*|*'|'*|*'<'*|*'>'*|*'('*|*')'*) return 0 ;;
+	esac
+	printf '%s\n' "$line" | awk -v sqc="'" '{
+		dq = 0; sq = 0;
+		for (i = 1; i <= length($0); i++) {
+			c = substr($0, i, 1);
+			if (c == "\"" && !sq) dq = !dq;
+			else if (c == sqc && !dq) sq = !sq;
+		}
+		exit (dq || sq);
+	}' || return 0
+	eval "export $line" 2>/dev/null || :
+}
 
-# For non-interactive shell (e.g. cron job) run only when the GPG key (in $GNUPGHOME or pass --homedir) is unlocked
-tty -s || (echo "dummy" | gpg --sign --batch --pinentry-mode error -o /dev/null > /dev/null 2>&1) || exit
+# Export the reconstructed values: an assignment without `export` would not
+# reach gpg, pass, mbsync or notmuch, which run as child processes.
+set -a
+for profile in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.zprofile" \
+	"$HOME/.config/zsh/.zprofile" "$HOME/.zshenv" \
+	"$HOME/.config/zsh/.zshenv" "$HOME/.bashrc" "$HOME/.zshrc" \
+	"$HOME/.config/zsh/.zshrc"; do
+	[ -f "$profile" ] || continue
+	while IFS= read -r line; do
+		profilevar "$line"
+	done <"$profile"
+done
+set +a
+# $HOME/.pam_environment is deliberately not parsed here: its syntax
+# ("NAME DEFAULT=value", "@{HOME}") is not shell syntax and eval would turn
+# it into literal or malformed paths. Use a shell profile for these settings.
+
+# Resolve gpg/gpg2 like `mw` does. On systems where only gpg2 exists, a
+# hard-coded `gpg` would make every cron run fail before syncing.
+GPG="$(command -v gpg 2>/dev/null || command -v gpg2 2>/dev/null || true)"
+
+# For a non-interactive shell (e.g. a cron job) run only when the GPG key that
+# protects the pass store is unlocked. Probe a real pass entry when one exists
+# rather than the unrelated default signing key.
+if ! tty -s; then
+	if [ -n "$GPG" ]; then
+		store="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+		probe="$(find "$store" -type f -name '*.gpg' 2>/dev/null | sed -n '1p')"
+		if [ -n "$probe" ]; then
+			"$GPG" --batch --decrypt "$probe" >/dev/null 2>&1 || exit
+		else
+			echo "dummy" | "$GPG" --sign --batch -o /dev/null >/dev/null 2>&1 || exit
+		fi
+	fi
+fi
 
 # Only set GPG_TTY when stdin really is a terminal; `tty` prints
 # "not a tty" to stdout when it is not, which must not end up in GPG_TTY.
@@ -115,14 +193,14 @@ esac
 # user's session bus socket if one exists. On OpenBSD there is no
 # /run/user by default; users there get the address from their own
 # environment instead, and we only override it when a socket really exists.
-[ -n "$DBUS_SESSION_BUS_ADDRESS" ] || {
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
 	if [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
 		DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 	elif [ -S "/run/user/$(id -u)/bus" ]; then
 		DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 	fi
-	export DBUS_SESSION_BUS_ADDRESS
-}
+	[ -n "$DBUS_SESSION_BUS_ADDRESS" ] && export DBUS_SESSION_BUS_ADDRESS
+fi
 
 notify() { # $1 = title, $2 = body
 	case "$os" in
@@ -146,6 +224,8 @@ notify() { # $1 = title, $2 = body
 }
 
 # Check account for new mail. Notify if there is new content.
+# The function's status reports the sync, not the presentation: under cron
+# there is no tty, notify-send may be absent, and MAILSYNC_MUTE may be set.
 syncandnotify() {
 	case "$1" in
 		imap) mbsync -q "$2" ;;
@@ -155,32 +235,46 @@ syncandnotify() {
 		"$maildir/$2/"[Ii][Nn][Bb][Oo][Xx]/new/ \
 		"$maildir/$2/"[Ii][Nn][Bb][Oo][Xx]/cur/ \
 		-type f -newer "$lastrun" 2> /dev/null)
-	newcount=$(echo "$new" | sed '/^[[:space:]]*$/d' | wc -l)
-	# shellcheck disable=SC2194
-	# (the arithmetic expansion in the case pattern is intentional)
-	case 1 in
-		$((newcount > 5)) )
-			tty -s 2>/dev/null && echo "$newcount new mails for $2." >/dev/tty
-			[ -z "$MAILSYNC_MUTE" ] && notify "New Mail!" "📬 $newcount new mails in \`$2\` account."
-			;;
-		$((newcount > 0)) )
-			tty -s 2>/dev/null && echo "$newcount new mail(s) for $2." >/dev/tty
-			[ -z "$MAILSYNC_MUTE" ] &&
-			for file in $new; do
-				# Extract and decode subject and sender from mail.
-				subject=$(awk '/^Subject: / && ++n == 1,/^.*: / && ++i == 2' "$file" | sed '$d' |
-					perl -CS -MEncode -ne 'print decode("MIME-Header", $_)' |
-					sed 's/^Subject: //' | tr -d '\n\t')
-				from="$(sed -n "/^From:/ s|From: *|| p" "$file" |
-					perl -CS -MEncode -ne 'print decode("MIME-Header", $_)')"
-				from="${from% *}" ; from="${from%\"}" ; from="${from#\"}"
-				notify "📧$from:" "$subject"
-			done
-			;;
-		# Keep this off stdout as well: the cron job captures stdout and
-		# would otherwise e-mail "No new mail" on every single run.
-		*) tty -s 2>/dev/null && echo "No new mail for $2." >/dev/tty ;;
-esac
+	newcount=$(printf '%s\n' "$new" | sed '/^[[:space:]]*$/d' | wc -l)
+	if [ -z "$MAILSYNC_MUTE" ]; then
+		# shellcheck disable=SC2194
+		# (the arithmetic expansion in the case pattern is intentional)
+		case 1 in
+			$((newcount > 5)) )
+				tty -s 2>/dev/null && echo "$newcount new mails for $2." >/dev/tty
+				notify "New Mail!" "📬 $newcount new mails in \`$2\` account."
+				;;
+			$((newcount > 0)) )
+				tty -s 2>/dev/null && echo "$newcount new mail(s) for $2." >/dev/tty
+				# Disable pathname expansion: a maildir name may contain
+				# glob characters.
+				set -f
+				for file in $new; do
+					# Stop at the header/body separator so body lines
+					# such as "Note: ..." never become the subject.
+					subject=$(awk '
+						/^[[:space:]]*$/ { exit }
+						tolower($0) ~ /^subject:/ {
+							sub(/^[^:]*:[[:space:]]*/, "")
+							print
+							exit
+						}
+					' "$file" |
+						perl -CS -MEncode -ne 'print decode("MIME-Header", $_)' |
+						tr -d '\n\t')
+					from="$(sed -n "/^From:/ s|From: *|| p" "$file" |
+						perl -CS -MEncode -ne 'print decode("MIME-Header", $_)')"
+					from="${from% *}" ; from="${from%\"}" ; from="${from#\"}"
+					notify "📧$from:" "$subject"
+				done
+				set +f
+				;;
+			# Keep this off stdout as well: the cron job captures stdout and
+			# would otherwise e-mail "No new mail" on every single run.
+			*) tty -s 2>/dev/null && echo "No new mail for $2." >/dev/tty ;;
+		esac
+	fi
+	return 0
 }
 
 maildir="${XDG_DATA_HOME:-"$HOME/.local/share"}/mail"
@@ -193,9 +287,22 @@ IFS='
 if [ -z "$1" ]; then
 	tosync="$allaccounts"
 else
-	tosync="$(for arg in "$@"; do for availacc in $allaccounts; do
-		[ "$arg" = "${availacc##* }" ] && echo "$availacc" && break
-	done || echo "error $arg"; done)"
+	tosync=""
+	for arg in "$@"; do
+		found=""
+		for availacc in $allaccounts; do
+			if [ "$arg" = "${availacc##* }" ]; then
+				tosync="${tosync}${tosync:+
+}${availacc}"
+				found=1
+				break
+			fi
+		done
+		if [ -z "$found" ]; then
+			tosync="${tosync}${tosync:+
+}error $arg"
+		fi
+	done
 fi
 
 pids=      # PIDs of backgrounded subshells
@@ -213,7 +320,7 @@ for account in $tosync; do
 			pids="$pids $!"
 			;;
 		error*)
-			echo "ERROR: Account ${account##* } not found."
+			echo "ERROR: Account ${account##* } not found." >&2
 			failed=$((failed+1))
 			;;
 	esac
@@ -230,9 +337,14 @@ done
 [ "$count" -gt "$failed" ] || exit 1
 
 if command -v notmuch >/dev/null 2>&1; then
-	notmuch new --quiet
+	notmuch new --quiet || :
 fi
 
-# Create a touch file that indicates the time of the last run of mailsync
-mkdir -p "${lastrun%/*}"
-touch "$lastrun"
+# Advance the reference timestamp only when every requested account succeeded.
+# A partial failure must not hide mail that a failed account never counted.
+if [ "$failed" -eq 0 ]; then
+	mkdir -p "${lastrun%/*}"
+	touch "$lastrun"
+else
+	exit 1
+fi

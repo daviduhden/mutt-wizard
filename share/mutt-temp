@@ -3,7 +3,7 @@
 set real_name = "$realname"
 set from = "$fulladdr"
 set sendmail = "msmtp -a $fulladdr"
-alias me $realname <$fulladdr>
+alias me "$realname" <$fulladdr>
 set folder = "$folder"
 set header_cache = "$cachedir/$safename/headers"
 set message_cache_dir = "$cachedir/$safename/bodies"

@@ -1,8 +1,10 @@
 account $fulladdr
 tls on
+$mpoptls
+tls_trust_file	"$sslcert"
 user $login
 host $imap
 port $iport
 timeout 10
 delivery maildir "$maildir/$fulladdr/INBOX"
-passwordeval pass $passprefix$fulladdr
+passwordeval "pass $passprefix$fulladdr"

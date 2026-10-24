@@ -57,17 +57,26 @@ or
 .I /run/user/UID/bus
 when one exists and none is exported.
 .PP
-Desktop notifications require
+On Linux and OpenBSD desktop notifications require
 .I notify-send
 (libnotify) and a D-Bus session; X displays are detected through
 .I /tmp/.X11-unix,
-which works for Xorg/XWayland on Linux and for Xenocara on OpenBSD. Without
-these components, mail is still synchronized; only the notifications are
-skipped.
+which works for Xorg/XWayland on Linux and for Xenocara on OpenBSD. On macOS
+notifications are delivered with
+.IR osascript .
+Without these components, mail is still synchronized; only the notifications
+are skipped.
+.PP
+Under cron there is no terminal for a GPG passphrase prompt. The key that
+protects the
+.I pass
+store must already be unlocked by the agent; otherwise
+.B mailsync
+exits before syncing any account.
 .SH SEE ALSO
 .BR mw (1),
 .BR neomutt (1),
-.BR neomuttrc (1)
+.BR neomuttrc (5),
 .BR mbsync (1),
 .BR mpop (1),
 .BR msmtp (1),

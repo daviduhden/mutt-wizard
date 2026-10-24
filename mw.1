@@ -48,6 +48,9 @@ toggle a cronjob without specifying minutes between sync
 .TP
 .B -r
 reorder account shortcut numbers
+.TP
+.B -h
+show a summary of the available options and exit successfully
 .SH OPTIONS FOR ADDING ACCOUNTS
 These can be specified on the command line, otherwise, you will be prompted for what is necessary. mutt-wizard knows the IMAP/SMTP server information for most email providers, so specifying them is usually redundant.
 .TP
@@ -73,7 +76,9 @@ SMTP server address
 SMTP server port (assumed to be 465 if not specified)
 .TP
 .B -x
-Account password. You will be prompted for the password interactively if this option is not given.
+Account password. You will be prompted for the password interactively if this option is not given. The value is visible to other local users in the process list and in shell history; prefer the interactive prompt or an existing
+.I pass
+entry.
 .TP
 .B -P
 Pass Prefix. The password will be stored using pass at <passprefix><email>
@@ -160,7 +165,7 @@ If you would like to help develop mutt-wizard for others, you are invited to add
 on mutt-wizard's Github <https://github.com/lukesmithxyz/mutt-wizard> or Gitlab <https://gitlab.com/lukesmithxyz/mutt-wizard> pages.
 .TP
 .B Gmail accounts
-Google will require you to allow "less-secure" (third party) applications or remove two-factor authentication in order to access their IMAP servers to download your mail. If you use Gmail, be sure to handle this before running mutt-wizard <https://support.google.com/accounts/answer/6010255>.
+Google requires an app password (with two-factor authentication enabled) for IMAP and SMTP access; "less secure" application access has been retired. Create an app password before running mutt-wizard <https://support.google.com/accounts/answer/185833>.
 .TP
 .B Enterprise and university accounts
 Many universities and businesses might host their domain's email via Google or another service. This often requires a special IMAP/SMTP-specific password that you must generate and use. Again, mutt-wizard can handle these systems, but only once they've been set up.
@@ -204,11 +209,12 @@ and
 .I command -v
 rather than hard-coded paths.
 .PP
-The Makefile works with both GNU make and BSD make, so on OpenBSD plain
-.I make install
-(with
-.I doas)
-is sufficient.
+The Makefile works with both GNU make and BSD make. On OpenBSD the manual
+pages must be installed under
+.I /usr/local/man
+to be found by
+.IR man (1):
+.I doas make install MANPREFIX=/usr/local/man
 .PP
 Automatic mail syncing uses the user's crontab
 .RI ( mw
@@ -223,12 +229,23 @@ script re-establishes a usable
 .I PATH
 itself, so a restricted cron environment is not a problem.
 .PP
-Desktop notifications from
+On Linux and OpenBSD, desktop notifications from
 .I mailsync
 require
 .I notify-send
-(part of libnotify; optional) and a D-Bus session bus. Without them, mail
-synchronization simply continues without notifications.
+(part of libnotify; optional) and a D-Bus session bus. On macOS they use
+.I osascript
+instead. Without the relevant components, mail synchronization simply
+continues without notifications.
+.PP
+When
+.I mailsync
+runs from cron there is no terminal for a GPG passphrase prompt. The key that
+protects the
+.I pass
+store must therefore be unlocked by the agent (for example with
+.I pam-gnupg
+or a suitable cache lifetime), otherwise the cron run exits before syncing.
 .PP
 On OpenBSD, the CA certificate bundle
 .I /etc/ssl/cert.pem
@@ -329,13 +346,13 @@ to find contacts matching your input. Although abook is often used with mutt, it
 .B Switching and moving mail between mailboxes
 The
 .I g
-key can be paired with several other keys to automatically move to another mailbox: gi: Inbox; gs: Sent; gd: Drafts; ga: Archive; gS: Spam; gj: Junk; gt: Trash. These bindings will only be present for accounts that have the boxes in question. Instead of
+key can be paired with several other keys to automatically move to another mailbox: gi: Inbox; gs: Sent; gd: Drafts; ga: Archive; gj: Junk; gt: Trash. Instead of
 .I g,
 you can also press
 .I C
 to copy mail or
 .I M
-to move mail to the same boxes.
+to move mail to the same boxes (for example Mj moves to Junk).
 .TP
 .B Switching between accounts
 mutt-wizard can configure as many as nine accounts each numbered by the lowest available number when configured. Press
@@ -359,7 +376,7 @@ at any time in neomutt to get a list of all key-bindings and functions. This lis
 .SH SEE ALSO
 .BR mailsync (1),
 .BR neomutt (1),
-.BR neomuttrc (1)
+.BR neomuttrc (5),
 .BR mbsync (1),
 .BR mpop (1),
 .BR msmtp (1),
