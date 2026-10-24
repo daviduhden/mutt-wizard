@@ -41,6 +41,10 @@ required.
 - **pass** — securely encrypts passwords (required at install).
 - **gpg** (GnuPG) — used by `pass` to encrypt passwords (required).
 - **envsubst** (from `gettext`) — writes configuration files (required).
+- **perl** — decodes MIME headers in `mailsync` notifications and powers the
+  notmuch search macro (required for those features).
+- **file** — MIME type detection for attachments in neomutt (the default
+  `mime_type_query_command` uses `file --mime-type`).
 - **ca-certificates** — required for SSL. Included in the OpenBSD base system
   as `/etc/ssl/cert.pem`; on Linux it is usually installed already.
 
@@ -54,7 +58,7 @@ version manually or remove the offending lines in the configuration in
 ```bash
 git clone https://github.com/LukeSmithxyz/mutt-wizard
 cd mutt-wizard
-sudo make install # on OpenBSD: doas make install
+sudo make install # on OpenBSD: doas make install MANPREFIX=/usr/local/man
 ```
 
 The Makefile is portable between GNU make and BSD make, so `make` on OpenBSD
@@ -80,8 +84,11 @@ Installation:
 
 ```
 doas pkg_add neomutt curl isync msmtp password-store gnupg gettext
-doas make install
+doas make install MANPREFIX=/usr/local/man
 ```
+
+`MANPREFIX=/usr/local/man` is needed because OpenBSD's `man(1)` searches
+`/usr/local/man`, not `/usr/local/share/man`.
 
 - `neomutt` — mail/neomutt
 - `curl` — net/curl
@@ -112,8 +119,11 @@ Optional packages (all available in ports):
 
 Mail syncing is scheduled with the base-system cron: `mw -t 30` adds a
 crontab entry; running it again removes the entry. The generated job invokes
-`/usr/local/bin/mailsync`, and the script re-establishes a sane `PATH`
-itself, so no cron-specific environment setup is needed.
+`/usr/local/bin/mailsync` (or `$PREFIX/bin/mailsync` with a custom prefix),
+and the script re-establishes a sane `PATH` itself, so no cron-specific
+environment setup is needed. Cron has no terminal for a GPG passphrase
+prompt, so the key protecting the `pass` store must already be unlocked by
+the agent (for example with `pam-gnupg` or a long enough cache lifetime).
 
 Known OpenBSD specifics:
 
@@ -168,13 +178,20 @@ mail is read with `neomutt`.
 - `-u` — account username, if different from the email address.
 - `-n` — a real name to be used by the account. Put in quotations if multiple
   words.
-- `-i` — IMAP server address
-- `-I` — IMAP server port (otherwise assumed to be 993)
+- `-i` — IMAP/POP server address
+- `-I` — IMAP/POP server port (otherwise assumed to be 993 for IMAP and 995
+  for POP)
 - `-s` — SMTP server address
 - `-S` — SMTP server port (otherwise assumed to be 465)
 - `-m` — maximum number of emails to be kept offline. No maximum is the
   default.
-- `-x` — account password. You will be prompted for it otherwise.
+- `-x` — account password. You will be prompted for it otherwise. The value
+  is visible to other local users in the process list and in shell history;
+  prefer the interactive prompt or an existing `pass` entry.
+- `-P` — pass prefix: store the password at `<prefix><email>` in the `pass`
+  store. The prefix is recorded with the account so that deletion removes the
+  matching entry.
+- `-R` — proxy URL for the `curl` connection test.
 
 #### General Settings
 
@@ -182,6 +199,8 @@ mail is read with `neomutt`.
   connecting online at all.
 - `-o` — configure mutt for an account, but do not keep mail offline.
 - `-p` — use POP protocol instead of IMAP (requires `mpop` installed).
+- `-X` — with `-d` or `-D`, also delete the account's local mail.
+- `-h` — show help and exit successfully.
 - `mailsync` gives visual messages of new mail by default. Set
   `MAILSYNC_MUTE=1` as an environment variable to disable them.
 
@@ -191,18 +210,18 @@ The default keybindings are as follows:
 
 - <kbd>m</kbd> — send mail (uses your default `$EDITOR` to write)
 - <kbd>j</kbd>/<kbd>k</kbd> and <kbd>d</kbd>/<kbd>u</kbd> — vim-like bindings
-  to go down and up (or <kbd>d</kbd>/<kbd>u</kbd> to go down/up a page).
+  to go down and up (or <kbd>d</kbd>/<kbd>u</kbd> to go down/up half a page).
 - <kbd>l</kbd> — open mail, or attachment page or attachment
 - <kbd>h</kbd> — the opposite of <kbd>l</kbd>
 - <kbd>r</kbd>/<kbd>R</kbd> — reply/reply all to highlighted mail
 - <kbd>s</kbd> — save selected mail or selected attachment
-- <kbd>gs</kbd>,<kbd>gi</kbd>,<kbd>ga</kbd>,<kbd>gd</kbd>,<kbd>gS</kbd> —
+- <kbd>gs</kbd>,<kbd>gi</kbd>,<kbd>ga</kbd>,<kbd>gd</kbd>,<kbd>gj</kbd> —
   press <kbd>g</kbd> followed by another letter to change mailbox:
   <kbd>s</kbd>ent, <kbd>i</kbd>nbox, <kbd>a</kbd>rchive, <kbd>d</kbd>rafts,
-  <kbd>S</kbd>pam, etc.
+  <kbd>j</kbd>unk, etc.
 - <kbd>M</kbd> and <kbd>C</kbd> — for <kbd>M</kbd>ove and <kbd>C</kbd>opy:
-  follow them with one of the mailbox letters above, i.e. <kbd>MS</kbd> means
-  "move to Spam".
+  follow them with one of the mailbox letters above, i.e. <kbd>Mj</kbd> means
+  "move to Junk".
 - <kbd>i#</kbd> — press <kbd>i</kbd> followed by a number 1-9 to go to a
   different account. If 9 accounts are added via mutt-wizard, they will each
   be assigned a number.
@@ -228,7 +247,11 @@ systemctl enable --user goimapnotify@fulladdrs.service
 This systemd user-service method is Linux-only. On OpenBSD, run
 `goimapnotify` from a session startup script (e.g. `~/.xsession`) instead;
 `mw` generates the per-account configuration in
-`~/.config/imapnotify/<address>.yaml` either way.
+`~/.config/imapnotify/<address>.yaml` either way. On macOS, start
+`goimapnotify` from a launch agent or your login items.
+
+Desktop notifications from `mailsync` use `notify-send` with D-Bus on Linux and
+OpenBSD, and `osascript` on macOS.
 
 The generated configuration verifies the server's TLS certificate
 (`"rejectUnauthorized": true`). If your server uses a self-signed
@@ -286,14 +309,12 @@ certificate, edit the generated YAML and set it to `false`.
 
 ## Known Issues
 
-- Gmail accounts need to create an
-  [App Password](https://support.google.com/accounts/answer/185833?hl=en) to
-  use with "less secure" applications. This password is single-use (i.e.
-  for setup) and will be stored and encrypted locally. Enabling third-party
-  applications requires turning off two-factor authentication and this will
-  circumvent that. You might also need to manually "Enable IMAP" in the
-  settings. To create an App Password for your Google account, you can
-  directly visit the
+- Gmail accounts require an
+  [App Password](https://support.google.com/accounts/answer/185833?hl=en)
+  for IMAP/SMTP access; Google has retired "less secure" application access.
+  App passwords require two-factor authentication to be enabled. The app
+  password is stored and encrypted locally by `pass`. You might also need to
+  manually "Enable IMAP" in the settings. Create one at the
   [App Passwords](https://myaccount.google.com/apppasswords) page in your
   Google Account settings.
 - If you have a university email or enterprise-hosted email for work, there

@@ -4,14 +4,24 @@
 .POSIX:
 
 PREFIX ?= /usr/local
-MANPREFIX = $(PREFIX)/share/man
+# Override on OpenBSD, where man(1) searches /usr/local/man rather than
+# /usr/local/share/man:
+#   doas make install MANPREFIX=/usr/local/man
+MANPREFIX ?= $(PREFIX)/share/man
 
 install:
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	mkdir -p $(DESTDIR)$(PREFIX)/lib/mutt-wizard
 	mkdir -p $(DESTDIR)$(PREFIX)/share/mutt-wizard
+	mkdir -p $(DESTDIR)$(PREFIX)/share/licenses/mutt-wizard
+	chmod 755 $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/lib/mutt-wizard \
+		$(DESTDIR)$(PREFIX)/share \
+		$(DESTDIR)$(PREFIX)/share/licenses \
+		$(DESTDIR)$(PREFIX)/share/licenses/mutt-wizard
 	cp -f bin/mailsync $(DESTDIR)$(PREFIX)/bin
 	cp -f lib/openfile $(DESTDIR)$(PREFIX)/lib/mutt-wizard
+	cp -f LICENSE $(DESTDIR)$(PREFIX)/share/licenses/mutt-wizard/LICENSE
+	chmod 644 $(DESTDIR)$(PREFIX)/share/licenses/mutt-wizard/LICENSE
 	chmod 755 $(DESTDIR)$(PREFIX)/share/mutt-wizard
 	for shared in share/*; do \
 		cp -f $$shared $(DESTDIR)$(PREFIX)/share/mutt-wizard/; \
@@ -29,10 +39,17 @@ install:
 	[ -n "$$wks" ] || wks="gpg-wks-client"; \
 	sed -e 's:/usr/local:$(PREFIX):g' -e "s|@WKS@|$$wks|" < share/mutt-wizard.muttrc > $(DESTDIR)$(PREFIX)/share/mutt-wizard/mutt-wizard.muttrc
 	mkdir -p $(DESTDIR)$(MANPREFIX)/man1
+	chmod 755 $(DESTDIR)$(MANPREFIX) $(DESTDIR)$(MANPREFIX)/man1
 	cp -f mailsync.1 $(DESTDIR)$(MANPREFIX)/man1/mailsync.1
 	sed 's:/usr/local:$(PREFIX):g' < share/mailcap > $(DESTDIR)$(PREFIX)/share/mutt-wizard/mailcap
 	sed 's:/usr/local:$(PREFIX):g' < bin/mw > $(DESTDIR)$(PREFIX)/bin/mw
-	sed 's:/usr/local:$(PREFIX):g' < mw.1 > $(DESTDIR)$(MANPREFIX)/man1/mw.1
+	# Only rewrite mutt-wizard's own paths in mw.1; /usr/local/bin also
+	# describes OpenBSD ports tools and must stay literal under a custom prefix.
+	sed -e 's:/usr/local/share/mutt-wizard:$(PREFIX)/share/mutt-wizard:g' \
+		-e 's:/usr/local/lib/mutt-wizard:$(PREFIX)/lib/mutt-wizard:g' \
+		-e 's:/usr/local/bin/mw:$(PREFIX)/bin/mw:g' \
+		-e 's:/usr/local/bin/mailsync:$(PREFIX)/bin/mailsync:g' \
+		< mw.1 > $(DESTDIR)$(MANPREFIX)/man1/mw.1
 	chmod 644 $(DESTDIR)$(MANPREFIX)/man1/mw.1 $(DESTDIR)$(MANPREFIX)/man1/mailsync.1
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/mw $(DESTDIR)$(PREFIX)/bin/mailsync $(DESTDIR)$(PREFIX)/lib/mutt-wizard/openfile
 	mkdir -p $(DESTDIR)$(PREFIX)/share/zsh/site-functions/
@@ -43,6 +60,7 @@ install:
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/mw $(DESTDIR)$(PREFIX)/bin/mailsync $(DESTDIR)$(PREFIX)/lib/mutt-wizard/openfile
 	rm -rf $(DESTDIR)$(PREFIX)/share/mutt-wizard  $(DESTDIR)$(PREFIX)/lib/mutt-wizard
+	rm -rf $(DESTDIR)$(PREFIX)/share/licenses/mutt-wizard
 	rm -f $(DESTDIR)$(MANPREFIX)/man1/mw.1  $(DESTDIR)$(MANPREFIX)/man1/mailsync.1
 	rm -f $(DESTDIR)$(PREFIX)/share/zsh/site-functions/_mutt-wizard.zsh
 

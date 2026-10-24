@@ -1,49 +1,33 @@
 #compdef mw
 
-_arguments \
-	'1:flag:->flags' \
-	'*:: :->args'
+_mw_accounts() {
+	local -a accounts
+	accounts=(${(f)"$(mw -l 2>/dev/null | sed 's/^[[:space:]]*[0-9][0-9]*[[:space:]]*//')"})
+	_describe 'account' accounts
+}
 
-case "$state" in
-	flags)
-		local -a opts
-		opts=(
-		'-a:Add an email address'
-		'-l:List email addresses configured'
-		'-d:Remove an already added address'
-		'-D:Force remove account without confirmation'
-		'-y:Sync mail for account by name'
-		'-Y:Sync mail for all accounts'
-		'-t:Toggle automatic mailsync every <number> minutes'
-		'-T:Toggle automatic mailsync every 10 minutes'
-		'-r:Reorder account numbers'
-		'-R:Use a proxy server for curl'
-		'-h:Display help'
-		)
-		_describe 'flags' opts
-		;;
-	args)
-		case $line[1] in
-			-a)
-				_alternative \
-				'args: :((
-					-u\:"Account login name if not full address"
-					-n\:"Real name to be on the email account"
-					-i\:"IMAP/POP server address"
-					-I\:"IMAP/POP server port"
-					-s\:"SMTP server address"
-					-S\:"SMTP server port"
-					-x\:"Password for account (recommended to be in double quotes)"
-					-P\:"Pass Prefix (prefix of the file where password is stored)"
-					-p\:"Add for a POP server instead of IMAP."
-					-X\:"Delete an account'"'"'s local email too when deleting."
-					-o\:"Configure address, but keep mail online."
-					-f\:"Assume typical English mailboxes without attempting log-on."
-					-m\:"Maximum number of emails to be kept offline"
-					-R\:"Use a proxy server for curl"
-					))'
-				;;
-			-D|-y)
-				_values 'email list' $(mw -l | cut -f2) 2>/dev/null
-		esac
-esac
+_arguments -s -S \
+	'-a[Add an email address]:email:' \
+	'-l[List email addresses configured]' \
+	'-d[Remove an already added address]' \
+	'-D[Force remove account without confirmation]:email:_mw_accounts' \
+	'-y[Sync mail for account by name (deprecated)]:email:_mw_accounts' \
+	'-Y[Sync mail for all accounts (deprecated)]' \
+	'-t[Toggle automatic mailsync every <number> minutes]:minutes:' \
+	'-T[Toggle automatic mailsync every 10 minutes]' \
+	'-r[Reorder account numbers]' \
+	'-h[Display help]' \
+	'-u[Account login name if not full address]:login:' \
+	'-n[Real name to be on the email account]:name:' \
+	'-i[IMAP/POP server address]:host:' \
+	'-I[IMAP/POP server port]:port:' \
+	'-s[SMTP server address]:host:' \
+	'-S[SMTP server port]:port:' \
+	'-x[Password for account (visible in the process list)]:password:' \
+	'-P[Pass prefix (prefix of the password store entry)]:prefix:' \
+	'-p[Add for a POP server instead of IMAP]' \
+	'-o[Configure address, but keep mail online]' \
+	'-f[Assume typical English mailboxes without attempting log-on]' \
+	'-m[Maximum number of emails to be kept offline]:number:' \
+	'-R[Use a proxy server for curl]:proxy:' \
+	'-X[With -d/-D, delete the account'"'"'s local email too]'
