@@ -64,4 +64,14 @@ uninstall:
 	rm -f $(DESTDIR)$(MANPREFIX)/man1/mw.1  $(DESTDIR)$(MANPREFIX)/man1/mailsync.1
 	rm -f $(DESTDIR)$(PREFIX)/share/zsh/site-functions/_mutt-wizard.zsh
 
-.PHONY: install uninstall
+.PHONY: all clean test install uninstall
+
+# This project ships scripts and has no build artifacts.
+all:
+	@:
+
+clean:
+	@:
+
+test:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/agent_knowledge_validator -p 'test_*.py'

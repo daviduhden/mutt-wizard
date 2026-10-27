@@ -46,7 +46,9 @@ and `${XDG_CACHE_HOME:-~/.cache}`; the mbsync config defaults to
 
 ## Commands
 
-There is no compile step and no automated test target in this repository.
+There is no compile step. `make all` and `make clean` are no-ops because the
+project produces no build artifacts; `make test` runs the shared agent-validator
+contract suite.
 
 - `sudo make install` (Linux/macOS) or `doas make install` (OpenBSD) installs
   the scripts, templates, man pages, and zsh completion. On OpenBSD use
@@ -56,10 +58,14 @@ There is no compile step and no automated test target in this repository.
   `mw -l`, `mw -d`, `mw -D address`, `mw -r`, `mw -t 30`, and `mw -T` are the
   other user-facing actions.
 - `mailsync` syncs all configured accounts; `mailsync address` syncs one.
+- `make install` installs the scripts and support files; plain `make` retains
+  `install` as its default target.
 - Static review: `git diff --check` for whitespace/conflict markers. If the
   operator permits execution, `sh -n bin/mw bin/mailsync lib/openfile` checks
   shell syntax only; `shellcheck -s sh` and `mandoc -Tlint mw.1 mailsync.1`
   are optional when installed.
+- `checkmake.ini` allows the existing install recipe's current 46-line body;
+  keep this bound exact so the linter still catches subsequent growth.
 - Build/install validation must use a temporary `DESTDIR` or a disposable
   prefix. Never install over a live system as part of an agent task.
 
@@ -76,8 +82,9 @@ There is no compile step and no automated test target in this repository.
   real `pass` store. Use a disposable `HOME`, `XDG_*`, `PASSWORD_STORE_DIR`,
   and `GNUPGHOME` if a runtime check is explicitly authorized.
 - Distinguish static analysis, build/install, tests, and a real end-to-end
-  check. Do not claim a test passed unless it was actually run. No test suite
-  is tracked (the former mock-based suite was removed).
+  check. Do not claim a test passed unless it was actually run. The former
+  application mock-based suite was removed; the shared agent-validator contract
+  suite now lives in `tests/agent_knowledge_validator/`.
 
 ## Pre-existing changes
 
@@ -94,3 +101,43 @@ Load the relevant skill before changing a subsystem:
 - [portable-posix-shell](.agents/skills/portable-posix-shell/SKILL.md)
 - [mailsync-and-scheduling](.agents/skills/mailsync-and-scheduling/SKILL.md)
 - [manual-pages-and-install-tests](.agents/skills/manual-pages-and-install-tests/SKILL.md)
+
+## Continuous Agent & Skills Maintenance
+
+Every repository change MUST trigger an Agent & Skills Maintenance Review.
+Agent instructions and skills are living repository artifacts. Before
+completing any repository modification, review all applicable `AGENTS.md`
+files, specialized agents, and `SKILL.md` files. Update the affected knowledge
+artifacts to reflect the implementation, correct outdated instructions, and
+incorporate reusable knowledge. A task is incomplete until knowledge
+synchronization has been performed and validated. Never skip synchronization
+silently or claim that unexecuted checks have passed.
+
+After each change:
+
+1. Identify and review the applicable agents and skills, even when no update
+   initially appears necessary.
+2. Update relevant operational guidance, reusable procedures, references,
+   commands, and paths; remove stale or contradictory instructions.
+3. Do not use whitespace-only, timestamp-only, empty, or otherwise cosmetic
+   edits to satisfy synchronization. For a project change, at least one
+   relevant knowledge artifact must receive a substantive update.
+4. Run `python3 scripts/validate-agent-knowledge.py --scope worktree` and the
+   applicable project checks. For a pull request, CI compares the base and head
+   revisions with `--scope range --base BASE_SHA --head HEAD_SHA`.
+5. Review the validator output and final diff, then report the synchronization
+   result. Warnings require human review; a structural pass does not establish
+   semantic relevance.
+
+Run the validator tests with
+`python3 -m unittest discover -s tests/agent_knowledge_validator -p 'test_*.py'`.
+The validator is read-only and uses Python 3.11+ and the standard library. It
+must not be confused with project-specific validation or installation tools.
+See [Agent Knowledge Validation Contract](docs/agent-knowledge-validation.md)
+for AK001–AK006, JSON schema, exit codes, configuration, and maintenance rules.
+
+All repositories must implement the same Agent Knowledge Validation CLI
+contract, rule identifiers, output conventions and exit codes. Repository-
+specific validations may extend the canonical behavior but must not silently
+redefine it. Any change to the validator contract must be reflected in the
+repository's agent instructions, related skills and tests.
