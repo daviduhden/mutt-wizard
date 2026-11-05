@@ -74,4 +74,4 @@ clean:
 	@:
 
 test:
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/agent_knowledge_validator -p 'test_*.py'
+	prove tests/agent_knowledge_validator/test_validator.pl
