@@ -56,7 +56,7 @@ version manually or remove the offending lines in the configuration in
 ### From Source
 
 ```bash
-git clone https://github.com/LukeSmithxyz/mutt-wizard
+git clone https://github.com/daviduhden/mutt-wizard
 cd mutt-wizard
 sudo make install # on OpenBSD: doas make install MANPREFIX=/usr/local/man
 ```

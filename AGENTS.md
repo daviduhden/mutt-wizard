@@ -4,8 +4,10 @@
 
 mutt-wizard is a POSIX `sh` configurator for terminal email. It provisions
 **neomutt**, **isync/mbsync** (IMAP), **mpop** (POP3), **msmtp** (SMTP), and
-**pass**/GPG credentials on Linux, macOS, and OpenBSD. This repository is a
-fork; keep upstream copyright notices and GPLv3 headers intact.
+**pass**/GPG credentials on Linux, macOS, and OpenBSD. This project is maintained independently at `daviduhden/mutt-wizard` and
+derives from LukeSmithxyz/mutt-wizard. Keep upstream copyright notices and
+GPLv3 headers intact. Installation and clone instructions must point to the
+maintained repository; retain upstream links when they identify provenance.
 
 ## Architecture
 

@@ -48,7 +48,9 @@ documentation that describes `mw`/`mailsync` behavior.
      as `/usr/local/bin` that are not mutt-wizard paths.
 4. Update the completion when flags or actions change. Keep value-taking
    options declared with their arguments.
-5. Preserve the GPLv3 text and copyright headers. Install a copy of `LICENSE`
+5. Verify that installation clone URLs target `daviduhden/mutt-wizard`;
+   upstream links may remain for historical attribution, not installation.
+6. Preserve the GPLv3 text and copyright headers. Install a copy of `LICENSE`
    with the program.
 
 ## Validation
